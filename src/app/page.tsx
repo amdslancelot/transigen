@@ -14,10 +14,13 @@ export default async function HomePage() {
       <div className="row">
         {user ? (
           <>
-            <Link className="pill" href="/transition">
-              Open transition page
+            <Link className="pill" href="/room">
+              Browse rooms
             </Link>
-            <Link className="pill" href="/rooms/new">
+            <Link className="pill" href="/transition">
+              Saved transitions
+            </Link>
+            <Link className="pill" href="/room/new">
               Create room set
             </Link>
           </>

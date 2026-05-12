@@ -15,13 +15,16 @@ create table if not exists public.transition_pairs (
   from_media jsonb not null,
   to_media jsonb not null,
   created_by uuid not null references auth.users(id) on delete cascade,
-  created_at timestamptz not null default now(),
-  unique (
-    (from_media->>'provider'),
-    (from_media->>'videoId'),
-    (to_media->>'provider'),
-    (to_media->>'videoId')
-  )
+  created_at timestamptz not null default now()
+);
+
+-- 使用 CREATE UNIQUE INDEX 來建立 JSONB 欄位內資料的唯一性限制
+create unique index if not exists idx_transition_pairs_unique_media 
+on public.transition_pairs (
+  (from_media->>'provider'),
+  (from_media->>'videoId'),
+  (to_media->>'provider'),
+  (to_media->>'videoId')
 );
 
 create table if not exists public.transition_proposals (

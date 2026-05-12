@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { formatSec } from "@/lib/youtube";
+import { useEffect, useId, useRef, useState } from "react";
+import { formatMinSec } from "@/lib/timeInput";
+import { loadYoutubeIframeApi } from "@/lib/youtubeIframeApi";
+import type { YTPlayer } from "@/lib/youtubeIframeApi";
 import { WaveformLikeVisualizer } from "./WaveformLikeVisualizer";
 
 type Props = {
@@ -12,24 +14,110 @@ type Props = {
 };
 
 export function YouTubePlayer({ label, videoId, startAt, onTime }: Props) {
+  const baseId = useId().replace(/:/g, "");
+  const containerId = `yt-simple-${baseId}`;
+  const playerRef = useRef<YTPlayer | null>(null);
+  const onTimeRef = useRef(onTime);
+  onTimeRef.current = onTime;
   const [now, setNow] = useState(0);
-  const src = useMemo(() => {
-    if (!videoId) return "";
-    const start = startAt && startAt > 0 ? `&start=${Math.floor(startAt)}` : "";
-    return `https://www.youtube.com/embed/${videoId}?enablejsapi=1${start}`;
-  }, [videoId, startAt]);
+  const [durationSec, setDurationSec] = useState(240);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!videoId) return;
-    const timer = setInterval(() => {
-      setNow((v) => {
-        const n = v + 1;
-        onTime?.(n);
-        return n;
+    if (!videoId) {
+      try {
+        playerRef.current?.destroy();
+      } catch {
+        /* noop */
+      }
+      playerRef.current = null;
+      return undefined;
+    }
+
+    let cancelled = false;
+    const start =
+      startAt != null && Number.isFinite(startAt) && startAt > 0 ? Math.max(0, startAt) : 0;
+
+    const origin =
+      typeof window !== "undefined" ? `${window.location.protocol}//${window.location.host}` : undefined;
+
+    void loadYoutubeIframeApi()
+      .then((YT) => {
+        if (cancelled) return;
+        try {
+          playerRef.current?.destroy();
+        } catch {
+          /* noop */
+        }
+        playerRef.current = null;
+
+        new YT.Player(containerId, {
+          height: 220,
+          width: "100%",
+          videoId,
+          playerVars: {
+            enablejsapi: 1,
+            playsinline: 1,
+            controls: 1,
+            rel: 0,
+            ...(origin ? { origin } : {}),
+          },
+          events: {
+            onReady: (ev) => {
+              if (cancelled) return;
+              playerRef.current = ev.target;
+              try {
+                if (start > 0) {
+                  ev.target.seekTo(start, true);
+                }
+                ev.target.pauseVideo();
+              } catch {
+                /* noop */
+              }
+              try {
+                const t = ev.target.getCurrentTime();
+                setNow(t);
+                onTimeRef.current?.(t);
+                const d = ev.target.getDuration();
+                if (Number.isFinite(d) && d > 1) setDurationSec(d);
+              } catch {
+                setNow(start);
+              }
+            },
+          },
+        });
+        setApiError(null);
+      })
+      .catch(() => {
+        if (!cancelled) setApiError("YouTube player failed to load.");
       });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [videoId, onTime]);
+
+    return () => {
+      cancelled = true;
+      try {
+        playerRef.current?.destroy();
+      } catch {
+        /* noop */
+      }
+      playerRef.current = null;
+    };
+  }, [videoId, startAt, containerId]);
+
+  useEffect(() => {
+    if (!videoId) return undefined;
+    const id = window.setInterval(() => {
+      const p = playerRef.current;
+      if (!p) return;
+      try {
+        const t = p.getCurrentTime();
+        setNow(t);
+        onTimeRef.current?.(t);
+      } catch {
+        /* noop */
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [videoId]);
 
   if (!videoId) {
     return (
@@ -43,17 +131,13 @@ export function YouTubePlayer({ label, videoId, startAt, onTime }: Props) {
     <div className="panel col">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <strong>{label}</strong>
-        <span className="muted">t={formatSec(now)}</span>
+        <span className="muted">t={formatMinSec(now)}</span>
       </div>
-      <iframe
-        title={label}
-        src={src}
-        width="100%"
-        height="220"
-        allow="autoplay; encrypted-media"
-        referrerPolicy="strict-origin-when-cross-origin"
-      />
-      <WaveformLikeVisualizer currentSec={now} durationSec={240} label={`${label} waveform`} />
+      {apiError ? (
+        <p style={{ color: "#fca5a5", margin: 0 }}>{apiError}</p>
+      ) : null}
+      <div id={containerId} />
+      <WaveformLikeVisualizer currentSec={now} durationSec={durationSec} label={`${label} waveform`} />
     </div>
   );
 }

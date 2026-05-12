@@ -1,189 +1,173 @@
 import Link from "next/link";
-import { createTransitionProposal, voteProposal } from "@/app/actions";
 import { requireUser } from "@/lib/auth";
+import { fetchSavedTransitionPairsPage } from "@/lib/savedTransitionPairs";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
-import { extractYoutubeVideoId, formatSec } from "@/lib/youtube";
-import { TransitionEditor } from "@/components/TransitionEditor";
-import { TransitionPreview } from "@/components/TransitionPreview";
-import type { ProposalWithVotes, TransitionPreset } from "@/types/db";
+import type { MediaRef } from "@/types/media";
+
+const PAGE_SIZE = 20;
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
 
-export default async function TransitionPage(props: { searchParams: SearchParams }) {
+function pickParam(v: string | string[] | undefined): string {
+  if (Array.isArray(v)) return v[0] ?? "";
+  return v ?? "";
+}
+
+function youtubeWatchUrl(videoId: string) {
+  return `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+}
+
+function formatArtistTrack(meta: { title: string; channelTitle: string } | undefined, videoId: string): string {
+  const title = (meta?.title ?? "").trim();
+  const ch = (meta?.channelTitle ?? "").trim();
+  if (ch && title) return `${ch} — ${title}`;
+  if (title) return title;
+  return videoId;
+}
+
+function mediaLabel(m: MediaRef, labels: Map<string, { title: string; channelTitle: string }>): string {
+  const id = m.videoId ?? "";
+  if (!id) return "—";
+  return formatArtistTrack(labels.get(id), id) || (m.title?.trim() ? m.title : id);
+}
+
+export default async function TransitionIndexPage(props: { searchParams: SearchParams }) {
   await requireUser();
-  const searchParams = await props.searchParams;
-  const fromVideoInput = String(searchParams.fromVideo ?? "");
-  const toVideoInput = String(searchParams.toVideo ?? "");
-  const fromVideo = extractYoutubeVideoId(fromVideoInput) ?? "";
-  const toVideo = extractYoutubeVideoId(toVideoInput) ?? "";
-  const endPrevSec = searchParams.endPrevSec ? Number(searchParams.endPrevSec) : null;
-  const startNextSec = searchParams.startNextSec ? Number(searchParams.startNextSec) : null;
+  const sp = await props.searchParams;
+  const rawQ = pickParam(sp.q);
+  const meaningful = rawQ.trim().replace(/[%_,\s]/g, "");
+  const q = meaningful.length > 0 ? rawQ.trim() : "";
+  const pageRaw = pickParam(sp.page);
+  const page = Math.max(1, Math.min(10_000, parseInt(pageRaw || "1", 10) || 1));
 
   const supabase = await getSupabaseServerClient();
-  const { data: presetsRaw } = await supabase.from("transition_presets").select("*").order("label");
-  const presets = (presetsRaw ?? []) as TransitionPreset[];
+  const { rows, total } = await fetchSavedTransitionPairsPage(supabase, { page, pageSize: PAGE_SIZE, q });
 
-  let proposals: ProposalWithVotes[] = [];
-  if (fromVideo && toVideo) {
-    const { data: pair } = await supabase
-      .from("transition_pairs")
-      .select("id")
-      .eq("from_media->>provider", "youtube")
-      .eq("from_media->>videoId", fromVideo)
-      .eq("to_media->>provider", "youtube")
-      .eq("to_media->>videoId", toVideo)
-      .maybeSingle();
-
-    if (pair?.id) {
-      const { data: rows } = await supabase
-        .from("transition_proposals")
-        .select("id,pair_id,proposed_by,end_prev_sec,start_next_sec,preset_id,note,created_at")
-        .eq("pair_id", pair.id)
-        .order("created_at", { ascending: true });
-
-      const pRows = (rows ?? []) as ProposalWithVotes[];
-      if (pRows.length > 0) {
-        const { data: votes } = await supabase
-          .from("transition_votes")
-          .select("proposal_id,user_id")
-          .in(
-            "proposal_id",
-            pRows.map((r) => r.id),
-          );
-        const grouped = new Map<string, number>();
-        for (const vote of votes ?? []) {
-          const current = grouped.get(vote.proposal_id as string) ?? 0;
-          grouped.set(vote.proposal_id as string, current + 1);
-        }
-        proposals = pRows
-          .map((row) => ({
-            ...row,
-            votes: grouped.get(row.id) ?? 0,
-            preset: presets.find((p) => p.id === row.preset_id) ?? null,
-          }))
-          .sort((a, b) => (b.votes === a.votes ? a.created_at.localeCompare(b.created_at) : b.votes - a.votes));
-      }
+  const videoIds = new Set<string>();
+  for (const r of rows) {
+    const a = r.from_media?.videoId;
+    const b = r.to_media?.videoId;
+    if (a) videoIds.add(a);
+    if (b) videoIds.add(b);
+  }
+  const labels = new Map<string, { title: string; channelTitle: string }>();
+  if (videoIds.size > 0) {
+    const { data: cacheRows } = await supabase
+      .from("youtube_video_cache")
+      .select("video_id,title,channel_title")
+      .in("video_id", [...videoIds]);
+    for (const row of cacheRows ?? []) {
+      const id = String(row.video_id ?? "");
+      if (!id) continue;
+      labels.set(id, {
+        title: (row.title as string) ?? "",
+        channelTitle: (row.channel_title as string) ?? "",
+      });
     }
   }
 
+  const hasNext = page * PAGE_SIZE < total;
+  const hasPrev = page > 1;
+  const qParam = q ? `&q=${encodeURIComponent(q)}` : "";
+
   return (
     <main className="container col" style={{ gap: "1rem" }}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Transition</h1>
-        <div className="row">
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
+        <h1>Saved transitions</h1>
+        <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
+          <Link className="pill" href="/transition/new">
+            New transition
+          </Link>
           <Link className="pill" href="/">
             Home
           </Link>
-          <Link className="pill" href="/rooms/new">
+          <Link className="pill" href="/room/new">
             Create room
           </Link>
         </div>
       </div>
 
-      <section className="panel col">
-        <h2>Pick a song pair (A→B)</h2>
-        <form className="col" action="/transition" method="get">
-          <div className="row">
-            <div className="col" style={{ flex: 1 }}>
-              <label htmlFor="fromVideo">Song A YouTube URL/ID</label>
-              <input id="fromVideo" name="fromVideo" defaultValue={fromVideoInput} required />
-            </div>
-            <div className="col" style={{ flex: 1 }}>
-              <label htmlFor="toVideo">Song B YouTube URL/ID</label>
-              <input id="toVideo" name="toVideo" defaultValue={toVideoInput} required />
-            </div>
-          </div>
-          <div className="row">
-            <div className="col">
-              <label htmlFor="endPrevSec">Preview switch time on A (sec)</label>
-              <input id="endPrevSec" name="endPrevSec" type="number" min={0} defaultValue={endPrevSec ?? ""} />
-            </div>
-            <div className="col">
-              <label htmlFor="startNextSec">Preview start time on B (sec)</label>
-              <input
-                id="startNextSec"
-                name="startNextSec"
-                type="number"
-                min={0}
-                defaultValue={startNextSec ?? ""}
-              />
-            </div>
-          </div>
-          <div className="row">
-            <button type="submit">Load pair + preview</button>
-          </div>
+      <section className="panel col" style={{ gap: "0.75rem" }}>
+        <form method="get" action="/transition" className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
+          <label htmlFor="transition-search" className="muted">
+            Search
+          </label>
+          <input
+            id="transition-search"
+            name="q"
+            type="search"
+            placeholder="Video ID, title, channel…"
+            defaultValue={rawQ}
+            style={{ flex: "1 1 220px", minWidth: 180, maxWidth: 480 }}
+            autoComplete="off"
+          />
+          <input type="hidden" name="page" value="1" />
+          <button type="submit">Search</button>
+          {q ? (
+            <Link className="secondary" href="/transition" style={{ fontSize: "0.9rem" }}>
+              Clear
+            </Link>
+          ) : null}
         </form>
+        <p className="muted" style={{ margin: 0 }}>
+          {total === 0
+            ? q
+              ? "No transitions match your search."
+              : "No saved transition pairs yet."
+            : `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`}
+        </p>
       </section>
 
-      <section className="panel col">
-        <h2>Preview A→B cutover</h2>
-        <TransitionPreview
-          fromInput={fromVideo}
-          toInput={toVideo}
-          endPrevSec={endPrevSec}
-          startNextSec={startNextSec}
-        />
-      </section>
-
-      <section className="panel col">
-        <h2>Propose a transition</h2>
-        <form action={createTransitionProposal} className="col">
-          <input type="hidden" name="fromVideo" value={fromVideo} />
-          <input type="hidden" name="toVideo" value={toVideo} />
-          <TransitionEditor presets={presets} />
-          <div className="row">
-            <button type="submit" disabled={!fromVideo || !toVideo}>
-              Save proposal
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="panel col">
-        <h2>Proposals (best first)</h2>
-        {!fromVideo || !toVideo ? (
-          <p className="muted">Pick Song A and Song B first.</p>
-        ) : proposals.length === 0 ? (
-          <p className="muted">No proposals yet for this pair.</p>
-        ) : (
-          <div className="col">
-            {proposals.map((proposal, idx) => (
-              <div
-                key={proposal.id}
-                className="row"
-                style={{ justifyContent: "space-between", borderBottom: "1px solid #2a2f3a", padding: "0.5rem 0" }}
-              >
-                <div className="col" style={{ flex: 1 }}>
-                  <div className="row">
-                    {idx === 0 ? <span className="pill">Best</span> : null}
-                    <span className="muted">By {proposal.proposed_by.slice(0, 8)}</span>
+      <section className="panel col" style={{ gap: 0 }}>
+        {rows.length === 0 ? null : (
+          <ul className="col" style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {rows.map((row) => {
+              const fromId = row.from_media?.videoId ?? "";
+              const toId = row.to_media?.videoId ?? "";
+              const href =
+                fromId && toId
+                  ? `/transition/new?fromVideo=${encodeURIComponent(youtubeWatchUrl(fromId))}&toVideo=${encodeURIComponent(youtubeWatchUrl(toId))}`
+                  : "/transition/new";
+              return (
+                <li
+                  key={row.id}
+                  className="row"
+                  style={{
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "0.75rem",
+                    borderBottom: "1px solid #2a2f3a",
+                    padding: "0.65rem 0",
+                  }}
+                >
+                  <div className="col" style={{ flex: 1, gap: "0.25rem" }}>
+                    <span>{mediaLabel(row.from_media, labels)}</span>
+                    <span className="muted">→ {mediaLabel(row.to_media, labels)}</span>
                   </div>
-                  <span>
-                    A end: {formatSec(proposal.end_prev_sec)} / B start: {formatSec(proposal.start_next_sec)}
-                  </span>
-                  <span className="muted">
-                    {proposal.preset?.label ?? "No preset"} {proposal.note ? `- ${proposal.note}` : ""}
-                  </span>
-                </div>
-                <div className="row">
-                  <span className="pill">{proposal.votes} votes</span>
-                  <form action={voteProposal}>
-                    <input type="hidden" name="proposalId" value={proposal.id} />
-                    <button type="submit">Vote</button>
-                  </form>
-                  <form action={voteProposal}>
-                    <input type="hidden" name="proposalId" value={proposal.id} />
-                    <input type="hidden" name="mode" value="remove" />
-                    <button type="submit" className="secondary">
-                      Unvote
-                    </button>
-                  </form>
-                </div>
-              </div>
-            ))}
-          </div>
+                  <Link className="pill" href={href}>
+                    Open
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </section>
+
+      {(hasPrev || hasNext) && total > 0 ? (
+        <div className="row" style={{ gap: "0.75rem", flexWrap: "wrap" }}>
+          {hasPrev ? (
+            <Link className="pill" href={`/transition?page=${page - 1}${qParam}`}>
+              Previous page
+            </Link>
+          ) : null}
+          {hasNext ? (
+            <Link className="pill" href={`/transition?page=${page + 1}${qParam}`}>
+              Next page
+            </Link>
+          ) : null}
+        </div>
+      ) : null}
     </main>
   );
 }

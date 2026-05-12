@@ -22,6 +22,8 @@ export type TransitionProposal = {
   end_prev_sec: number | null;
   start_next_sec: number | null;
   preset_id: string | null;
+  prev_bpm: number | null;
+  params: Record<string, unknown>;
   note: string | null;
   created_at: string;
 };
@@ -38,6 +40,8 @@ export type Room = {
   slug: string;
   start_media: MediaRef;
   created_at: string;
+  /** Popularity for directory sorting; incremented when someone opens the room. */
+  play_count?: number;
 };
 
 export type RoomSetItem = {

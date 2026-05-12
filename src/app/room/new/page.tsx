@@ -9,16 +9,21 @@ export default async function NewRoomPage() {
   async function createRoomAction(formData: FormData) {
     "use server";
     const roomId = await createRoom(formData);
-    redirect(`/rooms/${roomId}`);
+    redirect(`/room/${roomId}`);
   }
 
   return (
     <main className="container col" style={{ gap: "1rem" }}>
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h1>Create room set</h1>
-        <Link className="pill" href="/transition">
-          Transition page
-        </Link>
+        <div className="row">
+          <Link className="pill" href="/room">
+            All rooms
+          </Link>
+          <Link className="pill" href="/transition">
+            Transition page
+          </Link>
+        </div>
       </div>
       <section className="panel col">
         <form action={createRoomAction} className="col">
