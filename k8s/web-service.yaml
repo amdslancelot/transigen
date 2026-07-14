@@ -1,0 +1,30 @@
+# LoadBalancer Service for the web app. Provisions an OCI flexible-shape
+# load balancer capped at 10 Mbps to stay within the always-free tier
+# allowance (UNVERIFIED limit — see docs/design/deploy-oci-cicd-plan.md).
+#
+# Annotation keys verified against the oci-cloud-controller-manager
+# documentation (github.com/oracle/oci-cloud-controller-manager/blob/
+# master/docs/load-balancer-annotations.md), fetched 2026-07-13:
+# - service.beta.kubernetes.io/oci-load-balancer-shape: "flexible" selects
+#   the flexible shape (as opposed to a fixed shape like "100Mbps").
+# - service.beta.kubernetes.io/oci-load-balancer-shape-flex-min and
+#   ...-flex-max set the bandwidth range for the flexible shape, as bare
+#   numbers (Mbps) with no unit suffix.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: transigen
+  annotations:
+    service.beta.kubernetes.io/oci-load-balancer-shape: "flexible"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-min: "10"
+    service.beta.kubernetes.io/oci-load-balancer-shape-flex-max: "10"
+spec:
+  type: LoadBalancer
+  selector:
+    app: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+      protocol: TCP

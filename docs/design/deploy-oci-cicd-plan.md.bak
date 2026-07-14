@@ -1,0 +1,87 @@
+# Deploy plan: OCI + Terraform + Kubernetes (OKE)
+
+Status: plan only, nothing provisioned. Written 2026-07-13.
+
+## Goal and scope
+
+Deploy transigen to Oracle Cloud Infrastructure with reproducible infrastructure (Terraform) and automated build/deploy (GitHub Actions → OKE). Two workloads run in the cluster; Supabase stays external and managed:
+
+| Workload | Image | Kubernetes object |
+|---|---|---|
+| Next.js web app | `transigen-web` | Deployment (2 replicas) + Service + Ingress |
+| Beat-analysis worker | `transigen-worker` (existing `worker/Dockerfile`) | Deployment (1 replica, no Service — it only polls Supabase) |
+
+Out of scope: moving the database (Supabase remains the DB/Auth/Realtime provider), multi-environment promotion (single `prod` environment first; add `staging` later if needed).
+
+## Architecture
+
+```
+GitHub push to main
+  → GitHub Actions: build arm64 images → push to OCIR
+  → kubectl set image / kustomize apply → OKE
+OKE cluster (Ampere A1 arm64 nodes)
+  ├─ web Deployment ← OCI Load Balancer ← Ingress (nginx + cert-manager TLS)
+  └─ worker Deployment → yt-dlp/librosa → Supabase (track_analysis)
+Supabase (external): DB, Auth, Realtime
+```
+
+Notes on choices:
+
+- **Ampere A1 (arm64) node pool.** OCI's always-free tier covers up to 4 OCPU / 24 GB of A1 Flex compute and a basic OKE control plane, which fits this app comfortably. UNVERIFIED against current terms — confirm at https://www.oracle.com/cloud/free/ before provisioning. Consequence: all images must be built for `linux/arm64` (`docker buildx`). Both `python:3.11-slim` and `node` base images support arm64.
+- **OCIR** (OCI Container Registry) for images — same tenancy, no cross-cloud pulls.
+- **nginx ingress + cert-manager** rather than the OCI native ingress controller: better documented, Let's Encrypt TLS for free.
+
+## Repo additions
+
+```
+infra/                      # Terraform root module
+  backend.tf                # state in OCI Object Storage (S3-compatible)
+  network.tf                # VCN, public LB subnet, private node subnet, gateways
+  oke.tf                    # cluster + A1 node pool
+  ocir.tf                   # two image repos
+  variables.tf / outputs.tf
+k8s/                        # kustomize base
+  web-deployment.yaml, web-service.yaml, ingress.yaml
+  worker-deployment.yaml
+  kustomization.yaml
+.github/workflows/
+  ci.yml                    # PR: lint, tsc, next build
+  deploy.yml                # main: build+push images, rollout to OKE
+  infra.yml                 # infra/ changes: terraform plan on PR, gated apply
+Dockerfile                  # web app (multi-stage, next output: standalone)
+```
+
+`next.config` needs `output: "standalone"` so the web image is a small self-contained server instead of the whole node_modules tree.
+
+## Secrets and configuration
+
+- `NEXT_PUBLIC_*` variables are baked into the JS bundle **at image build time** — they must be passed as Docker build args in `deploy.yml`, not as runtime env. Changing them means rebuilding the image.
+- Server-side secrets (`SUPABASE_SERVICE_ROLE_KEY`, `YOUTUBE_API_KEY`) go into a Kubernetes Secret, created manually in Phase 2 and migrated to OCI Vault + External Secrets Operator in Phase 4 if the project lives long enough to justify it.
+- Production must NOT set `AUTH_DEV_EMAIL_BYPASS` or `NEXT_PUBLIC_AUTH_FLOW=dev_email_only`. Production auth flow is `magic_link`, which requires adding the production URL to Supabase Auth redirect URLs.
+- GitHub Actions secrets: OCI CLI API key (for kubeconfig generation via `oci ce cluster create-kubeconfig`), OCIR auth token (docker login), Supabase publishable values for build args.
+
+## CI/CD pipelines
+
+1. **ci.yml** — on every PR: `npm ci`, `tsc --noEmit`, `next build`. No cluster access.
+2. **deploy.yml** — on push to `main`: buildx both images for arm64, tag with the git SHA, push to OCIR, `kustomize edit set image`, `kubectl apply -k k8s/`, `kubectl rollout status`. Deploys are traceable to a commit and roll back with `kubectl rollout undo`.
+3. **infra.yml** — on PR touching `infra/`: `terraform fmt -check`, `validate`, `plan` posted to the PR. Apply runs only from `main` behind a GitHub environment approval gate. Terraform state lives in an OCI Object Storage bucket (bootstrapped manually once, before the first `terraform init`).
+
+## Phased rollout
+
+**Phase 0 — prerequisites.** OCI account + compartment, region choice, GitHub remote for this repo, manual bootstrap of the tfstate bucket, confirm free-tier limits.
+
+**Phase 1 — infrastructure.** Write and apply the Terraform root module: VCN, OKE cluster, A1 node pool, OCIR repos. Exit criteria: `kubectl get nodes` shows Ready arm64 nodes from a locally generated kubeconfig.
+
+**Phase 2 — manual deploy.** Write the web Dockerfile and k8s manifests. Build and push images by hand, create the Secret by hand, `kubectl apply -k k8s/`. Exit criteria: app reachable via the LB public IP, login works against Supabase, worker processes a real ingest job from inside the cluster (this also smoke-tests the yt-dlp risk below).
+
+**Phase 3 — automation.** The three GitHub Actions workflows. Exit criteria: a push to `main` reaches production with no manual steps; an infra PR shows a terraform plan.
+
+**Phase 4 — hardening.** DNS + custom domain, cert-manager TLS, resource requests/limits tuned from observed usage, OCI monitoring/alerting or kube-prometheus, NetworkPolicy isolating the worker, Vault-backed secrets.
+
+## Risks and open questions
+
+- **yt-dlp from datacenter IPs.** YouTube aggressively bot-checks cloud IP ranges; the worker may get 403/429 or "sign in to confirm you're not a bot" failures in OKE even though it works locally. Mitigations, in order of preference: keep the worker running on a residential machine (it only needs outbound HTTPS to Supabase — nothing else in this plan changes), export browser cookies into the container, or route the worker's egress through a proxy. Decide after the Phase 2 smoke test; do not build proxy infrastructure preemptively.
+- **Free-tier capacity contention.** A1 Flex free capacity is frequently exhausted in popular regions; node pool creation can fail with "out of host capacity". Mitigation: pick a less popular home region, or pay-as-you-go with a budget alert.
+- **YouTube IFrame playback is client-side**, so hosting location does not affect transition timing — no risk there.
+- **Costs beyond free tier** (LB bandwidth, egress, extra nodes): UNVERIFIED, check the OCI pricing page during Phase 0.
+- **Single-node worker assumption.** The worker's `poll_one` has no job locking; running >1 replica would double-process jobs. Keep `replicas: 1` until `ingest_jobs` claiming uses `FOR UPDATE SKIP LOCKED` or a status-transition guard.

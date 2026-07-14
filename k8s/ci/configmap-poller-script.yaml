@@ -1,0 +1,125 @@
+# Shell script run by the deploy-poller CronJob (see cronjob.yaml). It
+# checks GitHub for a new commit on main, and if the cluster is not
+# already running that commit, builds and deploys it in-cluster with
+# kaniko. No GitHub Actions or other external CI system is involved —
+# this poller is the entire CD pipeline.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: deploy-poller-script
+  namespace: transigen
+data:
+  poll.sh: |
+    #!/bin/sh
+    set -eu
+
+    NAMESPACE="transigen"
+    REPO="amdslancelot/transigen"
+    DEPLOYMENT="web"
+    CONTAINER="web"
+
+    # Unauthenticated GitHub API call (public repo, no token). GitHub
+    # rate-limits unauthenticated requests to 60/hour per source IP,
+    # which comfortably covers one call every 3 minutes (20/hour). If the
+    # call fails or is rate-limited, exit 0 quietly — the CronJob's next
+    # run 3 minutes later will simply try again, so a transient failure
+    # here should never surface as a Job failure or send an alert.
+    HEAD_SHA=$(curl -sf --max-time 10 \
+      "https://api.github.com/repos/${REPO}/commits/main" \
+      | grep -m1 '"sha"' | head -1 | sed -E 's/.*"sha": *"([0-9a-f]+)".*/\1/') || {
+      echo "GitHub API call failed or was rate-limited; skipping this run."
+      exit 0
+    }
+
+    if [ -z "${HEAD_SHA}" ]; then
+      echo "Could not parse HEAD SHA from GitHub API response; skipping this run."
+      exit 0
+    fi
+
+    echo "GitHub main HEAD SHA: ${HEAD_SHA}"
+
+    CURRENT_IMAGE=$(kubectl -n "${NAMESPACE}" get deployment "${DEPLOYMENT}" \
+      -o jsonpath="{.spec.template.spec.containers[?(@.name==\"${CONTAINER}\")].image}") || {
+      echo "Could not read current image from deployment/${DEPLOYMENT}; skipping this run."
+      exit 0
+    }
+
+    CURRENT_TAG="${CURRENT_IMAGE##*:}"
+    echo "Currently deployed tag: ${CURRENT_TAG}"
+
+    if [ "${CURRENT_TAG}" = "${HEAD_SHA}" ]; then
+      echo "Already up to date; nothing to do."
+      exit 0
+    fi
+
+    # OCIR_REPO is injected as an env var on the CronJob's pod spec, set
+    # from Terraform's ocir_repo_path output plus the region-specific
+    # OCIR registry hostname (see deploy/bootstrap.sh, which writes the
+    # actual value into the CronJob's env at apply time via the
+    # web-build-args ConfigMap's companion values).
+    IMAGE="${OCIR_REPO}:${HEAD_SHA}"
+    echo "Building ${IMAGE}"
+
+    JOB_NAME="kaniko-build-${HEAD_SHA}"
+    # Clean up any stale Job with this name (e.g. a retried poller run
+    # after a previous attempt errored out before completing).
+    kubectl -n "${NAMESPACE}" delete job "${JOB_NAME}" --ignore-not-found --wait=true
+
+    NEXT_PUBLIC_SUPABASE_URL=$(kubectl -n "${NAMESPACE}" get configmap web-build-args \
+      -o jsonpath='{.data.NEXT_PUBLIC_SUPABASE_URL}')
+    NEXT_PUBLIC_SUPABASE_ANON_KEY=$(kubectl -n "${NAMESPACE}" get configmap web-build-args \
+      -o jsonpath='{.data.NEXT_PUBLIC_SUPABASE_ANON_KEY}')
+    NEXT_PUBLIC_AUTH_FLOW=$(kubectl -n "${NAMESPACE}" get configmap web-build-args \
+      -o jsonpath='{.data.NEXT_PUBLIC_AUTH_FLOW}')
+
+    cat <<EOF | kubectl apply -f -
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: ${JOB_NAME}
+      namespace: ${NAMESPACE}
+      labels:
+        app: kaniko-build
+    spec:
+      ttlSecondsAfterFinished: 3600
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app: kaniko-build
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: kaniko
+              image: gcr.io/kaniko-project/executor:latest
+              args:
+                - --context=git://github.com/${REPO}#refs/heads/main
+                - --dockerfile=Dockerfile
+                - --destination=${IMAGE}
+                - --build-arg=NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+                - --build-arg=NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+                - --build-arg=NEXT_PUBLIC_AUTH_FLOW=${NEXT_PUBLIC_AUTH_FLOW}
+              volumeMounts:
+                - name: ocir-cred
+                  mountPath: /kaniko/.docker
+                  readOnly: true
+          volumes:
+            - name: ocir-cred
+              secret:
+                secretName: ocir-cred
+                items:
+                  - key: .dockerconfigjson
+                    path: config.json
+    EOF
+
+    echo "Waiting for ${JOB_NAME} to complete..."
+    if ! kubectl -n "${NAMESPACE}" wait --for=condition=complete "job/${JOB_NAME}" --timeout=900s; then
+      echo "kaniko build did not complete within timeout; leaving deployment untouched."
+      echo "--- last 200 lines of kaniko pod logs ---"
+      kubectl -n "${NAMESPACE}" logs "job/${JOB_NAME}" --tail=200 || true
+      exit 1
+    fi
+
+    echo "Build succeeded. Rolling out ${IMAGE}."
+    kubectl -n "${NAMESPACE}" set image "deployment/${DEPLOYMENT}" "${CONTAINER}=${IMAGE}"
+    kubectl -n "${NAMESPACE}" rollout status "deployment/${DEPLOYMENT}" --timeout=300s

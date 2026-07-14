@@ -1,0 +1,46 @@
+# Runs poll.sh (deploy-poller-script ConfigMap) every 3 minutes. This is
+# the entire CD pipeline for transigen: no GitHub Actions, no external
+# runner. concurrencyPolicy Forbid prevents two pollers from racing to
+# build the same commit if a previous run overruns its 3-minute slot
+# (e.g. because it is waiting on a slow kaniko build).
+#
+# Image: alpine/k8s, chosen because it bundles both curl and a matching
+# kubectl in one image (verified via Docker Hub description, 2026-07-13).
+# bitnami/kubectl was considered but recent versions dropped curl.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: deploy-poller
+  namespace: transigen
+spec:
+  schedule: "*/3 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: deploy-poller
+          restartPolicy: Never
+          containers:
+            - name: poller
+              image: alpine/k8s:1.31.1
+              command: ["/bin/sh", "/scripts/poll.sh"]
+              env:
+                # Set by deploy/bootstrap.sh at apply time to
+                # "<region-key>.ocir.io/<tenancy-namespace>/transigen-web"
+                # (Terraform's ocir_repo_path output combined with the
+                # region-specific OCIR hostname). The placeholder here is
+                # inert until bootstrap.sh patches this CronJob.
+                - name: OCIR_REPO
+                  value: "PLACEHOLDER_OCIR_REPO/transigen-web"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+          volumes:
+            - name: script
+              configMap:
+                name: deploy-poller-script
+                defaultMode: 0755

@@ -25,3 +25,13 @@ worklog.md
 
 # OS
 .DS_Store
+
+# Terraform (infra/)
+infra/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+
+# Deploy secrets and generated kubeconfig (deploy/)
+deploy/.env.production
+deploy/kubeconfig

@@ -1,0 +1,15 @@
+# Placeholder values for the NEXT_PUBLIC_* build args baked into the web
+# image at build time. deploy/bootstrap.sh overwrites this ConfigMap with
+# real values read from deploy/.env.production on every bootstrap run
+# (kubectl apply of a regenerated version of this manifest), so the
+# values checked into git here are never the ones actually used to build
+# a deployed image.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: web-build-args
+  namespace: transigen
+data:
+  NEXT_PUBLIC_SUPABASE_URL: "REPLACED_BY_BOOTSTRAP"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: "REPLACED_BY_BOOTSTRAP"
+  NEXT_PUBLIC_AUTH_FLOW: "magic_link"

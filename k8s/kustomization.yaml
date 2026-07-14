@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: transigen
+
+resources:
+  - namespace.yaml
+  - web-deployment.yaml
+  - web-service.yaml
+  - ci/serviceaccount.yaml
+  - ci/rbac.yaml
+  - ci/configmap-build-args.yaml
+  - ci/configmap-poller-script.yaml
+  - ci/cronjob.yaml

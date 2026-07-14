@@ -38,6 +38,7 @@ Next.js 15 + React 19 + Supabase（DB/Auth/migrations，無 edge functions）。
 ## 設計文件（按需讀）
 
 - `docs/design/audio-cache-feasibility.md` — 「先下載音檔+記憶體播放」架構評估（Phase 1/2 分期、風險、client cache 規則）。動 transition 精準度或播放架構前必讀。
+- `docs/design/deploy-oci-cicd-plan.md` — OCI + Terraform + OKE 部署，pull-based in-cluster CD（deploy-poller + kaniko，無 GitHub Actions）。worker 維持本地不部署。動部署/infra 前必讀。
 
 ## 制度檔（按需讀）
 

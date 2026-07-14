@@ -1,0 +1,42 @@
+# Namespace-scoped permissions for deploy-poller: read/patch the web
+# Deployment's image, and create/watch/delete the kaniko build Jobs it
+# spawns (including reading their pod logs for troubleshooting). No
+# access outside the transigen namespace and no access to Secrets beyond
+# what is already mounted into pods it creates.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: deploy-poller
+  namespace: transigen
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # The poller script reads the NEXT_PUBLIC_* build args from the
+  # web-build-args ConfigMap before each kaniko build.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: deploy-poller
+  namespace: transigen
+subjects:
+  - kind: ServiceAccount
+    name: deploy-poller
+    namespace: transigen
+roleRef:
+  kind: Role
+  name: deploy-poller
+  apiGroup: rbac.authorization.k8s.io

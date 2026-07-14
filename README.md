@@ -130,3 +130,35 @@ Set `NEXT_PUBLIC_AUTH_FLOW` in `.env.local` and restart `npm run dev`.
 |---|---|---|
 | `YOUTUBE_API_KEY` | Google Cloud Console → YouTube Data API v3 | Auto-fill title, channel, duration when adding songs |
 | `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify Developer Dashboard | BPM lookup (note: Spotify audio-features API returns 403 for dev-mode apps since 2024 — effectively dead) |
+
+---
+
+## Deploy (OCI)
+
+The web app deploys to Oracle Cloud Infrastructure (OKE) with Terraform-provisioned infrastructure and a pull-based, in-cluster CD pipeline — no GitHub Actions or other external CI system involved. Full design and known risks: `docs/design/deploy-oci-cicd-plan.md`.
+
+The worker intentionally stays local (see the Worker setup section above, including the Podman instructions) — it is not part of the deployed surface, because running yt-dlp from a datacenter IP risks YouTube bot-detection failures that do not occur from a residential machine.
+
+### Prerequisites
+
+- An OCI account with a compartment to deploy into.
+- OCI CLI installed and configured (`oci setup config`) so that `oci iam region list` succeeds.
+- [Terraform](https://developer.hashicorp.com/terraform/install) and `kubectl` on `PATH`.
+
+### One-time setup
+
+```sh
+cp deploy/.env.production.example deploy/.env.production
+```
+
+Fill in `deploy/.env.production` with your Supabase credentials, YouTube API key, OCIR push credential, and OCI tenancy/compartment/region — see the comments in the file for where each value comes from. The region is the full identifier only (e.g. `us-ashburn-1`); the short OCIR region key (e.g. `iad`) is derived automatically by Terraform, so you never need to look it up. Then run:
+
+```sh
+./deploy/bootstrap.sh
+```
+
+This provisions the VCN, OKE cluster, and node pool with Terraform, generates a kubeconfig, creates the Kubernetes secrets and ConfigMaps, applies the `k8s/` manifests, and triggers the first build. It prints the load balancer's public IP when done — add `http://<that-ip>` to Supabase Auth → URL Configuration → Redirect URLs so magic-link sign-in works. The script is idempotent and safe to re-run.
+
+### Upgrades
+
+Just `git push` to `main`. A CronJob running inside the cluster polls the GitHub API every 3 minutes, and when it sees a new commit it builds the image in-cluster (via kaniko) and rolls out the update automatically. No local step, no CI minutes, no manual redeploy.
