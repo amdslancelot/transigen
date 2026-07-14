@@ -16,6 +16,7 @@ import {
 } from "@/lib/transitionPresetTick";
 import { loadYoutubeIframeApi } from "@/lib/youtubeIframeApi";
 import type { YTPlayer } from "@/lib/youtubeIframeApi";
+import { fitPlaybackClock, type ClockSample } from "@/lib/playbackClock";
 
 type Props = {
   edges: PlaybackEdge[];
@@ -51,6 +52,8 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
   const tailEndSecRef = useRef(DEFAULT_DUR);
   const tickRef = useRef<TransitionTickState>(createTransitionTickState());
   const echoDebugSinkRef = useRef<EchoPresetTickDebug | null>(null);
+  const deckAClockSamplesRef = useRef<ClockSample[]>([]);
+  const deckBClockSamplesRef = useRef<ClockSample[]>([]);
 
   const [playersReady, setPlayersReady] = useState(false);
   const [phase, setPhase] = useState<"idle" | "playing" | "done">("idle");
@@ -137,8 +140,17 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     let tAv = 0;
     let tBv = 0;
     try {
-      tAv = pA.getCurrentTime();
-      tBv = pB.getCurrentTime();
+      const rawA = pA.getCurrentTime();
+      const nowA = performance.now();
+      const samplesA = [...deckAClockSamplesRef.current, { wallMs: nowA, playerSec: rawA }].slice(-10);
+      deckAClockSamplesRef.current = samplesA;
+      tAv = samplesA.length >= 2 ? fitPlaybackClock(samplesA)(nowA) : rawA;
+
+      const rawB = pB.getCurrentTime();
+      const nowB = performance.now();
+      const samplesB = [...deckBClockSamplesRef.current, { wallMs: nowB, playerSec: rawB }].slice(-10);
+      deckBClockSamplesRef.current = samplesB;
+      tBv = samplesB.length >= 2 ? fitPlaybackClock(samplesB)(nowB) : rawB;
     } catch {
       rafRef.current = requestAnimationFrame(() => edgeLoopRef.current());
       return;
@@ -147,7 +159,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     setTA(tAv);
     setTB(tBv);
 
-    const echoPreset = buildPresetPlan(edge.presetCode, edge.bpm, edge.fadeBars).kind === "echo";
+    const echoPreset = buildPresetPlan(edge.presetCode, edge.bpm, edge.fadeBars, edge.beat_offset).kind === "echo";
     const shouldFinish = transitionPresetTickFrame(
       pA,
       pB,
@@ -167,6 +179,8 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
 
     if (shouldFinish) {
       stopRaf();
+      deckAClockSamplesRef.current = [];
+      deckBClockSamplesRef.current = [];
       finishToB(pA, pB, edge.startNextSec, tickRef.current);
 
       const next = idx + 1;
@@ -186,7 +200,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
       window.setTimeout(() => {
         if (!playingRef.current) return;
         tickRef.current = createTransitionTickState();
-        const plan2 = buildPresetPlan(nextEdge.presetCode, nextEdge.bpm, nextEdge.fadeBars);
+        const plan2 = buildPresetPlan(nextEdge.presetCode, nextEdge.bpm, nextEdge.fadeBars, nextEdge.beat_offset);
         seedEchoStutterFromPlan(tickRef.current, plan2, nextEdge.endPrevSec);
         tickRef.current.cutDone = false;
         setUiEdgeIdx(next);
@@ -351,7 +365,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
 
     const e0 = edgesRef.current[0];
     tickRef.current = createTransitionTickState();
-    const plan = buildPresetPlan(e0.presetCode, e0.bpm, e0.fadeBars);
+    const plan = buildPresetPlan(e0.presetCode, e0.bpm, e0.fadeBars, e0.beat_offset);
     seedEchoStutterFromPlan(tickRef.current, plan, e0.endPrevSec);
     tickRef.current.cutDone = false;
     setUiEdgeIdx(0);
@@ -519,7 +533,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
             </div>
           )}
         </div>
-        {chainReady && cur && buildPresetPlan(cur.presetCode, cur.bpm, cur.fadeBars).kind === "echo" ? (
+        {chainReady && cur && buildPresetPlan(cur.presetCode, cur.bpm, cur.fadeBars, cur.beat_offset).kind === "echo" ? (
           <div className="col" style={{ flex: "0 1 280px", minWidth: 220, maxWidth: "100%" }}>
             <EchoPresetDebugPanel snapshot={echoDebugSnapshot} />
           </div>

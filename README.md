@@ -1,116 +1,132 @@
-# Transigen (YouTube-first MVP)
+# Transigen
 
-Two-page collaborative app:
+DJ transition app. Paste YouTube links to build a setlist, play in a room with dual-deck beat-synced transitions.
 
-- `transition`: users propose and vote the best transition for a directed pair A -> B.
-- `room`: users chain songs A -> B -> C using best pair transitions, capped to 1 hour.
+Built with Next.js 15 + React 19 + Supabase (DB/Auth). Playback via YouTube IFrame API. Beat analysis via a separate Python worker.
+
+---
 
 ## Setup
 
-1. Install Node.js 20+.
-2. `npm install`
-3. Copy `.env.example` to `.env.local` and fill Supabase vars.
-4. In Supabase **Authentication → URL Configuration**, add your app origin and callback to **Redirect URLs** (e.g. `http://localhost:3000` and `http://localhost:3000/auth/callback` for local dev).
-5. Apply SQL migrations in order: `0001_init.sql`, `0002_transition_presets_params.sql`, `0003_metadata_caches.sql`.
-6. (Optional) Add `YOUTUBE_API_KEY`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET` to `.env.local` to enable server-side metadata + Auto BPM lookup.
-7. `npm run dev`
+### 1. Install dependencies
 
-### External API setup (optional)
+```sh
+npm install
+```
 
-| Env var | Where to get it | Used for |
-|---------|-----------------|----------|
-| `YOUTUBE_API_KEY` | <https://console.cloud.google.com/apis/library/youtube.googleapis.com> → Enable → Credentials → API key. Free, 10k units/day. | Server-side YouTube `videos.list` (title, channel, duration). Cached in `youtube_video_cache`. |
-| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | <https://developer.spotify.com/dashboard> → Create app. Free. | BPM lookup via Spotify search + `audio-features`. Cached in `spotify_track_cache` + `youtube_spotify_link`. |
+### 2. Configure environment variables
 
-Without these env vars, the **Create New Transition** form still works (the user can type duration/BPM manually); the **Auto BPM** button and the auto-filled metadata simply error gracefully.
+Create `.env.local` in the project root:
 
-## Auth flow switch
+```sh
+NEXT_PUBLIC_SUPABASE_URL=       # Supabase project URL (Settings → API)
+NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Publishable key (Settings → API)
+SUPABASE_SERVICE_ROLE_KEY=      # Secret key (Settings → API) — never expose to browser
+NEXT_PUBLIC_AUTH_FLOW=dev_email_only  # see Auth flow section below
+```
 
-Set `NEXT_PUBLIC_AUTH_FLOW` in `.env.local` and **restart** `npm run dev` (value is read at startup).
+Optional:
 
-| Value | Behavior |
-|--------|----------|
-| `magic_link` (default) | Send magic link; same as original flow. |
-| `email_password` | Sign up + sign in with email and password. If Supabase **Confirm email** is on, the first sign-up still sends a confirmation link; after that, use **Sign in** with the same email and password. |
-| `dev_email_only` | Email only, no mail sent. Requires `AUTH_DEV_EMAIL_BYPASS=1`, `SUPABASE_SERVICE_ROLE_KEY`, and `AUTH_DEV_SHARED_PASSWORD` (see `.env.example`). **Insecure — local/dev only.** |
+```sh
+YOUTUBE_API_KEY=                # Google Cloud → YouTube Data API v3 → Credentials
+```
 
-## MVP behavior
+### 3. Apply database migrations
 
-- YouTube/Spotify transition proposals are timestamp-only:
-  - `end_prev_sec` for song A
-  - `start_next_sec` for song B
-- Presets are labels only (real DSP FX reserved for mp3/wav phase).
-- Waveform visuals are SoundCloud-like progress visuals, not audio-derived waveforms.
+In Supabase SQL Editor (or via `supabase db push`), run all files in order:
 
-## 你還要在 Supabase 後台做的
-Authentication → URL Configuration → Redirect URLs 加入（本機範例）：
+```
+supabase/migrations/0001_init.sql
+supabase/migrations/0002_transition_presets_params.sql
+supabase/migrations/0003_metadata_caches.sql
+supabase/migrations/0004_rename_fade_preset.sql
+supabase/migrations/0004_room_play_count_directory.sql
+supabase/migrations/0005_echo_preset_cadence.sql
+supabase/migrations/0006_subsecond_proposal_times.sql
+supabase/migrations/0007_track_analysis.sql
+```
 
+### 4. Configure Supabase Auth redirect URLs
+
+In Supabase dashboard → Authentication → URL Configuration → Redirect URLs, add:
+
+```
 http://localhost:3000
 http://localhost:3000/auth/callback
-若沒加 callback 這條，magic link 可能被 Supabase 擋下或導向失敗。
+```
 
-npm run build 已通過。若你之後用正式網域，記得在 Redirect URLs 一併加上對應的 https://你的網域/auth/callback。
+Set Site URL to `http://localhost:3000` for local dev.
 
+### 5. Start the app
 
-## 以下是從零到「登入並開始用」的簡短流程（本機假設用 http://localhost:3000）。
-
-### 事前準備（只做一次）
-1. 環境變數
-  專案根目錄有 .env.local，內含 NEXT_PUBLIC_SUPABASE_URL、NEXT_PUBLIC_SUPABASE_ANON_KEY（來自 Supabase 專案 Settings → API）。
-
-2. Supabase 後台
-  Authentication → URL Configuration → Redirect URLs 要包含：
-
-- http://localhost:3000
-- http://localhost:3000/auth/callback
-  Site URL 建議設成 http://localhost:3000（本機開發時）。
-3. 資料庫
-  在 Supabase SQL Editor 執行 supabase/migrations/0001_init.sql（README 步驟 5）。
-
-4.啟動專案
-
-```shell
-npm install
+```sh
 npm run dev
 ```
 
-### 登入步驟
-1. 瀏覽器打開 http://localhost:3000。
-2. 點 Sign in，進 /login。
-3. 輸入 email → Send magic link。
-4. 到信箱點 登入連結（會先經過 /auth/callback，再導回首頁 /）。
-5. 回到首頁後若已登入，會看到 Open transition page 和 Create room set，不再只有 Sign in。
+Open `http://localhost:3000`.
 
-### 開始用 App
-- Open transition page → /transition：為歌曲對 A→B 提 transition、投票。
-- Create room set → /room/new：建立 room，把多首歌串成 set。
-注意： 寄信與點連結盡量都用同一個網址習慣（例如一律 localhost:3000，不要混用 127.0.0.1），否則 Cookie 可能對不上。若點連結後又回到登入頁並帶錯誤訊息，先檢查 Redirect URLs 是否已加上 /auth/callback。
+---
 
+## Worker setup (beat analysis)
 
+The worker downloads audio via yt-dlp and detects BPM + beat grid. Without it the app works but transitions use manually entered BPM.
 
+### Prerequisites
 
-### 設定檔
-- src/config/authFlow.ts：集中讀取 NEXT_PUBLIC_AUTH_FLOW，並提供 isDevEmailBypassServerEnabled()（讀 AUTH_DEV_EMAIL_BYPASS）。
+Python 3.11+, ffmpeg installed on the system. On macOS, librosa requires LLVM 22 for its numba dependency:
 
-### 三種模式（重啟 npm run dev 後生效）
-| Flow Type      | Behavior Description                                                                                                                                                                                                                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| magic_link     | The original Send magic link flow. All related code is still intact.                                                                                                                                                                                                                                         |
-| email_password | Sign up (email + password) -> If Supabase has Confirm email enabled, a confirmation email will still be sent the first time (equivalent to verify). Afterwards, use Sign in (email + password) to log in instead of using a magic link. To save time on your local machine, you can disable Confirm email in Supabase. |
-| dev_email_only | Enter email only, no emails will be sent. The backend uses the service role to create the account or update the password, and then logs in using a shared internal password via signInWithPassword. Limited to local/development environments only.                                                          |
-
-### .env.local 範例
-- 改用帳密（取代一直用 magic link）：
-```shell
-NEXT_PUBLIC_AUTH_FLOW=email_password
+```sh
+brew install llvm ffmpeg
 ```
 
-- 完全不要寄信（避開 rate limit，僅開發）：
-```shell
-NEXT_PUBLIC_AUTH_FLOW=dev_email_only
-AUTH_DEV_EMAIL_BYPASS=1
-SUPABASE_SERVICE_ROLE_KEY=你的_service_role_金鑰
-AUTH_DEV_SHARED_PASSWORD=請用長隨機字串
-SUPABASE_SERVICE_ROLE_KEY 在 Supabase Project Settings → API → service_role（勿提交到 git、勿用 NEXT_PUBLIC_）。
+Then install Python deps with LLVM pointed at cmake:
+
+```sh
+CMAKE_PREFIX_PATH="/usr/local/opt/llvm" LLVM_CONFIG="/usr/local/opt/llvm/bin/llvm-config" pip install -r worker/requirements.txt
 ```
 
+### Configure
+
+Create `worker/.env` with the same Supabase project credentials:
+
+```sh
+SUPABASE_URL=              # same as NEXT_PUBLIC_SUPABASE_URL
+SUPABASE_SERVICE_ROLE_KEY= # Secret key — same as in .env.local
+```
+
+### Run
+
+```sh
+python worker/worker.py
+```
+
+Or with Podman:
+
+```sh
+cd worker
+podman build -t transigen-worker .
+podman run --env-file .env transigen-worker
+```
+
+The worker polls `ingest_jobs` every 5 seconds. When a room loads, the app queues all songs automatically. The room UI shows "分析中 x/y 首" until analysis completes. Analyzed BPM and beat offset are cached permanently — each song is only downloaded once across all rooms.
+
+---
+
+## Auth flow
+
+Set `NEXT_PUBLIC_AUTH_FLOW` in `.env.local` and restart `npm run dev`.
+
+| Value | Behavior |
+|---|---|
+| `magic_link` | Email magic link (default) |
+| `email_password` | Sign up + sign in with email and password |
+| `dev_email_only` | Email only, no email sent. Requires `AUTH_DEV_EMAIL_BYPASS=1`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), and `AUTH_DEV_SHARED_PASSWORD`. **Local/dev only.** |
+
+---
+
+## Optional integrations
+
+| Env var | Source | Used for |
+|---|---|---|
+| `YOUTUBE_API_KEY` | Google Cloud Console → YouTube Data API v3 | Auto-fill title, channel, duration when adding songs |
+| `SPOTIFY_CLIENT_ID` / `SPOTIFY_CLIENT_SECRET` | Spotify Developer Dashboard | BPM lookup (note: Spotify audio-features API returns 403 for dev-mode apps since 2024 — effectively dead) |

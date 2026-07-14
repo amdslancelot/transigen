@@ -56,7 +56,7 @@ export function seedEchoStutterFromPlan(
     tick.seeksLeft = plan.n;
     const windowLen = plan.window;
     const rawAnchor = Math.max(0, endPrevSec - windowLen);
-    const snapped = snapEchoStutterAnchor(rawAnchor, plan.step, endPrevSec, plan.n);
+    const snapped = snapEchoStutterAnchor(rawAnchor, plan.step, endPrevSec, plan.n, plan.beatOffset);
     tick.echoStutterAnchor = snapped;
     tick.nextSeekAt = snapped;
     tick.echoExhaustedMuteDone = undefined;
@@ -123,7 +123,7 @@ export function transitionPresetTickFrame(
     }
     case "echo": {
       const rawAnch = Math.max(0, endPrevSec - planNow.window);
-      const anch = tick.echoStutterAnchor ?? snapEchoStutterAnchor(rawAnch, planNow.step, endPrevSec, planNow.n);
+      const anch = tick.echoStutterAnchor ?? snapEchoStutterAnchor(rawAnch, planNow.step, endPrevSec, planNow.n, planNow.beatOffset);
       const windowLen = planNow.window;
 
       if (tA < anch) {
@@ -203,7 +203,7 @@ export function transitionPresetTickFrame(
     }
     case "stutter": {
       const rawAnch = Math.max(0, endPrevSec - planNow.window);
-      const anch = tick.echoStutterAnchor ?? snapEchoStutterAnchor(rawAnch, planNow.step, endPrevSec, planNow.n);
+      const anch = tick.echoStutterAnchor ?? snapEchoStutterAnchor(rawAnch, planNow.step, endPrevSec, planNow.n, planNow.beatOffset);
       if (tick.seeksLeft > 0) {
         const firesDone = planNow.n - tick.seeksLeft;
         const threshold = anch + firesDone * planNow.step;

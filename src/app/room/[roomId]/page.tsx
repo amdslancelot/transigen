@@ -6,9 +6,11 @@ import { coerceProposalSeconds, formatMinSec } from "@/lib/timeInput";
 import { formatSec } from "@/lib/youtube";
 import { RoomChainPicker } from "@/components/RoomChainPicker";
 import { RoomFullSetPlayer } from "@/components/RoomFullSetPlayer";
+import { TrackIngestStatus } from "@/components/TrackIngestStatus";
 import { RoomPlayIncrement } from "@/components/RoomPlayIncrement";
 import { RoomTitleBar } from "@/components/RoomTitleBar";
 import type { ProposalWithVotes, Room, RoomSetItem, TransitionProposal } from "@/types/db";
+import { triggerIngest } from "@/app/actions";
 
 type Params = Promise<{ roomId: string }>;
 
@@ -89,11 +91,29 @@ export default async function RoomPage(props: { params: Params }) {
   const extendFromVideoId =
     items.length > 0 ? (items[items.length - 1].media.videoId ?? "") : (typedRoom.start_media.videoId ?? "");
 
-  const playbackEdges = buildRoomPlaybackEdges(typedRoom, items, proposalsById);
-
   const startVid = typedRoom.start_media.videoId ?? "";
   const itemVids = items.map((i) => i.media.videoId).filter((v): v is string => typeof v === "string" && v.length > 0);
   const allVideoIds = Array.from(new Set([startVid, ...itemVids].filter((id) => id.length > 0)));
+
+  if (allVideoIds.length > 0) {
+    await triggerIngest(allVideoIds);
+  }
+
+  const trackAnalysisMap = new Map<string, { bpm: number; beat_offset: number }>();
+  if (allVideoIds.length > 0) {
+    const { data: analysisRows } = await supabase
+      .from("track_analysis")
+      .select("video_id, bpm, beat_offset")
+      .in("video_id", allVideoIds);
+    for (const row of analysisRows ?? []) {
+      const id = String(row.video_id ?? "");
+      if (id && row.bpm != null) {
+        trackAnalysisMap.set(id, { bpm: Number(row.bpm), beat_offset: Number(row.beat_offset ?? 0) });
+      }
+    }
+  }
+
+  const playbackEdges = buildRoomPlaybackEdges(typedRoom, items, proposalsById, trackAnalysisMap);
 
   const trackMetaById = new Map<string, YoutubeListMeta>();
   if (allVideoIds.length > 0) {
@@ -143,6 +163,7 @@ export default async function RoomPage(props: { params: Params }) {
           The room start track is preloaded on Player 1. After you add songs from saved transitions below, this
           section plays the whole chain with each transition&apos;s preset (fade / echo / stutter).
         </p>
+        <TrackIngestStatus videoIds={allVideoIds} />
         <RoomFullSetPlayer edges={playbackEdges} startVideoId={startVid} />
       </section>
 

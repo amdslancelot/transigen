@@ -1,6 +1,27 @@
+# Dependencies
 node_modules/
-node_modules/*
-.DS_Store
-.env.local
-supabase/.DS_Store
+
+# Next.js build output
 .next/
+out/
+tsconfig.tsbuildinfo
+
+# Environment files (contain Supabase service role key and API secrets)
+.env
+.env.local
+.env*.local
+worker/.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Tooling state (generated token-usage logs)
+.upward/
+
+# Personal working notes
+worklog.md
+
+# OS
+.DS_Store

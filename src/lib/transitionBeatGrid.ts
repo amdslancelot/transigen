@@ -8,13 +8,14 @@ export function snapEchoStutterAnchor(
   step: number,
   endPrevSec: number,
   seekCount: number,
+  beatOffset: number = 0,
 ): number {
   if (!Number.isFinite(rawAnchor) || !Number.isFinite(endPrevSec)) return 0;
   if (step <= 0 || !Number.isFinite(step) || seekCount < 1) return Math.max(0, rawAnchor);
 
   const n = seekCount;
   const maxAnchor = Math.max(0, endPrevSec - (n - 1) * step - 1e-4);
-  const snapped = Math.round(rawAnchor / step) * step;
+  const snapped = Math.round((rawAnchor - beatOffset) / step) * step + beatOffset;
   return Math.max(0, Math.min(snapped, maxAnchor));
 }
 

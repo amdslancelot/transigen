@@ -1,0 +1,5 @@
+supabase>=2.0.0
+yt-dlp
+librosa==0.10.2.post1
+soundfile
+python-dotenv

@@ -611,6 +611,14 @@ export async function addRoomSong(formData: FormData) {
   revalidatePath("/room");
 }
 
+export async function triggerIngest(videoIds: string[]): Promise<void> {
+  if (!videoIds.length) return;
+  const supabase = await getSupabaseServerClient();
+  await supabase
+    .from("ingest_jobs")
+    .upsert(videoIds.map((v) => ({ video_id: v })), { onConflict: "video_id", ignoreDuplicates: true });
+}
+
 const YT_ID_RE = /^[a-zA-Z0-9_-]{11}$/;
 
 export async function confirmRoomChain(roomId: string, chainVideoIds: string[]) {

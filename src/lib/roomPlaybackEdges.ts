@@ -12,6 +12,7 @@ export type PlaybackEdge = {
   presetCode: string;
   bpm: number | null;
   fadeBars: 1 | 2 | 4 | null;
+  beat_offset: number | null;
 };
 
 type ProposalWithPresetRow = ProposalWithVotes & {
@@ -38,6 +39,7 @@ export function buildRoomPlaybackEdges(
   room: Room,
   items: RoomSetItem[],
   proposalsById: Map<string, ProposalWithPresetRow>,
+  trackAnalysisMap?: Map<string, { bpm: number; beat_offset: number }>,
 ): PlaybackEdge[] {
   const edges: PlaybackEdge[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -63,8 +65,9 @@ export function buildRoomPlaybackEdges(
       endPrevSec: coerceProposalSeconds(prop.end_prev_sec),
       startNextSec: coerceProposalSeconds(prop.start_next_sec),
       presetCode: code,
-      bpm: prop.prev_bpm,
+      bpm: trackAnalysisMap?.get(fromVid)?.bpm ?? prop.prev_bpm,
       fadeBars,
+      beat_offset: trackAnalysisMap?.get(fromVid)?.beat_offset ?? null,
     });
   }
   return edges;
