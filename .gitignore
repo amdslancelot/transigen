@@ -23,6 +23,7 @@ __pycache__/
 # Personal working notes
 worklog.md
 plan.md
+TODO.md
 
 # Local backup copies (may contain credentials — e.g. .env.local.bak, worker/.env.bak)
 *.bak
