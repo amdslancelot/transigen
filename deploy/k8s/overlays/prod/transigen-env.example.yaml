@@ -1,0 +1,33 @@
+# Template for the prod Secrets. These are NOT applied by kustomize — copy to
+# secrets.yaml (gitignored) on the server and let deploy/deploy.sh apply them,
+# or `kubectl apply -f` them by hand into namespace transigen. Every value
+# below is a placeholder.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: transigen-env
+  namespace: transigen
+type: Opaque
+stringData:
+  # Points at the shared Postgres in the `data` namespace. The transigen_rw
+  # password must match TRANSIGEN_DB_PASSWORD in the server-local
+  # postgres-secret (owned by the gelp checkout; see deploy/k8s/data/README.md).
+  DATABASE_URL: "postgres://transigen_rw:replace-with-transigen-db-password@postgres.data.svc.cluster.local:5432/transigen"
+
+  # Auth.js session/JWT signing secret. Generate with: openssl rand -base64 32
+  AUTH_SECRET: "replace-with-openssl-rand-base64-32"
+
+  # Google OAuth client used for sign-in. The client must list
+  # https://${TRANSIGEN_HOST}/api/auth/callback/google as an authorized
+  # redirect URI.
+  AUTH_GOOGLE_ID: "replace-with-google-oauth-client-id"
+  AUTH_GOOGLE_SECRET: "replace-with-google-oauth-client-secret"
+
+  # Canonical public URL of the deployed app; substituted from $TRANSIGEN_HOST.
+  AUTH_URL: "https://${TRANSIGEN_HOST}"
+  AUTH_TRUST_HOST: "true"
+
+  # Optional integrations; the app works without them.
+  YOUTUBE_API_KEY: ""
+  SPOTIFY_CLIENT_ID: ""
+  SPOTIFY_CLIENT_SECRET: ""

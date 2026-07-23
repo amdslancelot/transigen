@@ -1,0 +1,105 @@
+# Shared PostgreSQL for every app on the node. One server, one database + one
+# least-privilege login role per app (see init/10-provision-apps.sh). Run as a
+# StatefulSet so it keeps stable storage and a stable network identity via the
+# headless Service; clients connect at postgres.data.svc.cluster.local:5432.
+#
+# storageClassName is intentionally omitted so each cluster's default class is
+# used (k3s "local-path" in prod, minikube "standard" if you exercise it locally).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  # Headless: DNS resolves straight to the single pod. It is both the governing
+  # Service for the StatefulSet and the address apps connect to.
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17
+          ports:
+            - name: postgres
+              containerPort: 5432
+          # Superuser password plus one password per app role, all from the same
+          # (out-of-band) Secret. The entrypoint reads POSTGRES_PASSWORD; the
+          # provisioning script reads the *_DB_PASSWORD keys.
+          envFrom:
+            - secretRef:
+                name: postgres-secret
+          env:
+            # Keep PGDATA in a subdirectory of the mount so initdb never has to
+            # contend with a volume-root lost+found directory.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            # Scripts here run once, the first time the data volume initialises.
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-q"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-q"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              # Shared across all apps, so the memory ceiling is lifted from the
+              # single-app default; CPU stays capped to protect the other core.
+              cpu: "1"
+              memory: 2Gi
+      volumes:
+        - name: init
+          configMap:
+            name: postgres-init
+            # Executable so the entrypoint runs it as its own process instead of
+            # sourcing it (a non-executable *.sh is sourced, leaking its `set -e`
+            # into the entrypoint shell). It still fails fast on error either way,
+            # which is what we want: a bad init must not leave a half-set-up DB.
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 20Gi

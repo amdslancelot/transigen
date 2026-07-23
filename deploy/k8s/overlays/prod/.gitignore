@@ -1,0 +1,2 @@
+# Real prod secret values live only on the server; never commit them.
+secrets.yaml

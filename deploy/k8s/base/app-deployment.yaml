@@ -1,0 +1,56 @@
+# Runs the Transigen app server. The image is built locally and loaded into
+# the target cluster's node image store (minikube image load in staging; k3s
+# ctr import in prod) — there is no registry — so overlays set the tag and the
+# pull policy tolerates a node-local image.
+#
+# The app is stateless (data lives in the shared Postgres), so a plain rolling
+# update is safe; the single replica is a capacity choice, not a constraint.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: transigen
+  labels:
+    app: transigen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: transigen
+  template:
+    metadata:
+      labels:
+        app: transigen
+    spec:
+      containers:
+        - name: transigen
+          image: transigen:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - secretRef:
+                name: transigen-env
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

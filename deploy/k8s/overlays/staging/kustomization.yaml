@@ -1,0 +1,28 @@
+# Staging overlay: upstream Kubernetes (minikube), namespace transigen-staging,
+# locally built image, plain-HTTP ingress on transigen.staging.localhost (a
+# host distinct from gelp's staging.localhost — the two apps share the same
+# local cluster), in-cluster shared Postgres, and dev secrets.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: transigen-staging
+
+resources:
+  - namespace.yaml
+  - ../../base
+  - secrets.yaml
+
+# stage.sh builds and loads this exact tag into minikube.
+images:
+  - name: transigen
+    newTag: staging
+
+# Point the base ingress at the local staging host.
+patches:
+  - target:
+      kind: Ingress
+      name: transigen
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: transigen.staging.localhost

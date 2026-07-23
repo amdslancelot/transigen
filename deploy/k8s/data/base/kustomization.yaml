@@ -1,0 +1,16 @@
+# Base for the shared data plane: the `data` namespace and one Postgres server.
+# Overlays add the postgres-secret and set PROVISION_APPS (which apps to create a
+# database + role for). This base is not applied directly — use an overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: data
+
+resources:
+  - namespace.yaml
+  - postgres.yaml
+
+configMapGenerator:
+  - name: postgres-init
+    files:
+      - init/10-provision-apps.sh

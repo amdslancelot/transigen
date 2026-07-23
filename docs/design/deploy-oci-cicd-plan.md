@@ -2,6 +2,10 @@
 
 Status: implemented. Originally written 2026-07-13 as a GitHub Actions based plan; revised the same day to the final pull-based design below before any infrastructure was provisioned. See `docs/design/deploy-oci-cicd-plan.md.bak` for the earlier draft.
 
+> **SUPERSEDED 2026-07-17.** This OKE/Terraform/deploy-poller design was replaced wholesale by gelp's deploy pattern: staging on local minikube, prod on the shared OCI k3s server via a push webhook, kustomize overlays, and the shared multi-app Postgres data plane. See `deploy/README.md` for the current setup. The infra/, k8s/, and deploy/bootstrap.sh files this document describes have been deleted.
+
+> **Update 2026-07-16 — Supabase removed.** The app migrated from Supabase to plain PostgreSQL (`pg` + raw SQL) with Google OAuth via Auth.js; every Supabase reference below is superseded. Consequences for this plan: there are no `NEXT_PUBLIC_*` build args anymore (the `web-build-args` ConfigMap and kaniko `--build-arg` flags were removed), the `web-runtime` Secret now carries `DATABASE_URL`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, and `YOUTUBE_API_KEY`, and the post-deploy manual step is registering the load balancer IP in the Google OAuth client (redirect URI `http://<LB-IP>/api/auth/callback/google`) instead of Supabase redirect URLs. **Open decision: where production Postgres runs** — the Terraform stack does not provision a database; `DATABASE_URL` must point at one you operate separately.
+
 ## Goal and scope
 
 Deploy the transigen web app to Oracle Cloud Infrastructure with reproducible infrastructure (Terraform) and automated build/deploy that requires no external CI system. Only the Next.js web app is deployed; Supabase stays external and managed, and the Python beat-analysis worker (`worker/`) stays local, run by hand via podman or `python worker/worker.py`.

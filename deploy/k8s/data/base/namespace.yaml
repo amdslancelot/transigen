@@ -1,0 +1,9 @@
+# The shared data plane lives in its own namespace so the one Postgres server is
+# clearly cluster infrastructure, not owned by any single app. Apps in gelp /
+# crossmix / chores reach it cross-namespace at postgres.data.svc.cluster.local.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: data
+  labels:
+    kubernetes.io/metadata.name: data
