@@ -1,7 +1,7 @@
 # transigen — CLAUDE.md（索引）
 
 DJ transition app：使用者貼 YouTube link 組 setlist，在 room 內雙 deck 播放，transition effect 對拍切歌。
-Next.js 15 + React 19 + Supabase（DB/Auth/migrations，無 edge functions）。播放走 YouTube IFrame API。
+Next.js 15 + React 19 + PostgreSQL（raw SQL via pg，migrations 在 db/migrations/）+ Auth.js Google OAuth。播放走 YouTube IFrame API。
 
 **本檔只是索引。只讀你任務需要的那條指到的檔，不要為了「了解專案」整包掃 src/。**
 
@@ -30,7 +30,7 @@ Next.js 15 + React 19 + Supabase（DB/Auth/migrations，無 edge functions）。
 | | `src/lib/transitionHandoff.ts` | hard-cut 交接 |
 | | `src/lib/transitionBeatGrid.ts` | BPM→bar 對齊數學 |
 | 型別 | `src/types/db.ts`、`src/types/media.ts` | Room、RoomSetItem（即 setlist 一格）、TransitionProposal 等 |
-| DB schema | `supabase/migrations/` | 0001–0006；含 youtube/bpm metadata cache 表 |
+| DB schema | `db/migrations/` | 合併 baseline 0001（users、rooms、caches、ingest_jobs+NOTIFY trigger）；`npm run migrate` 套用 |
 | 工作日誌 | `worklog.md` | 近況與待辦（Spotify audio-features 已確認是死路：dev-mode 403） |
 
 無 Web Audio API — 目前音量控制只有 `YT.Player.setVolume()`。無測試框架。
@@ -38,7 +38,8 @@ Next.js 15 + React 19 + Supabase（DB/Auth/migrations，無 edge functions）。
 ## 設計文件（按需讀）
 
 - `docs/design/audio-cache-feasibility.md` — 「先下載音檔+記憶體播放」架構評估（Phase 1/2 分期、風險、client cache 規則）。動 transition 精準度或播放架構前必讀。
-- `docs/design/deploy-oci-cicd-plan.md` — OCI + Terraform + OKE 部署，pull-based in-cluster CD（deploy-poller + kaniko，無 GitHub Actions）。worker 維持本地不部署。動部署/infra 前必讀。
+- `docs/design/webaudio-playback-plan.md` — **可續接的執行計畫**（2026-07-21 定案）：把播放音源從 iframe 換到 Web Audio，走「fetch-once + 有上限的 LRU cache」（沿用 worker 既有 yt-dlp 抽取、不新增 YouTube 請求）。含 HookLab 研究結論、三方權衡、Step 0 先驗抽取健康度、丟棄式 spike。要接手做 Web Audio 播放先讀這份。
+- `deploy/README.md` — 部署 runbook（沿用 gelp 的模式）：staging 在本機 minikube（`deploy/stage.sh`），prod 在與 gelp 共用的 OCI k3s 機器（push webhook 觸發 `deploy/deploy.sh`），共用 Postgres data plane。動部署前必讀。`docs/design/deploy-oci-cicd-plan.md` 已作廢（superseded banner 在檔頭）。
 
 ## 制度檔（按需讀）
 
