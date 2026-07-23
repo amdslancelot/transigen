@@ -51,6 +51,14 @@ kubectl -n data exec -i deploy/postgres -- \
   env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD="transigen" \
   bash -s < "${SCRIPT_DIR}/provision-db.sh"
 
+# Secrets follow the snoopy_home pattern: values live in an env file (dev/test
+# values, committed) and the Secret is created from it at deploy time — no
+# Secret YAML anywhere. The namespace must exist before the Secret can.
+echo "==> Creating/refreshing the transigen-env Secret from deploy/env.staging"
+kubectl apply -f deploy/k8s/overlays/staging/namespace.yaml
+kubectl -n transigen-staging create secret generic transigen-env \
+  --from-env-file=deploy/env.staging --dry-run=client -o yaml | kubectl apply -f -
+
 echo "==> Applying staging app overlay"
 kubectl apply -k deploy/k8s/overlays/staging
 

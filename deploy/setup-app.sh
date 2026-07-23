@@ -21,9 +21,10 @@
 #      (deploy/provision-db.sh piped into the postgres pod). There is no
 #      automatic re-provisioning: if the Postgres volume is ever
 #      re-initialised, re-run this script and restore from backup.
-#   3. Creates deploy/k8s/overlays/prod/secrets.yaml from the example with the
+#   3. Creates the gitignored deploy/env.prod from env.prod.example with the
 #      DB password and a generated AUTH_SECRET filled in (Google OAuth values
-#      stay placeholders — fill them in before sign-in will work).
+#      stay placeholders — fill them in before sign-in will work). deploy.sh
+#      creates the transigen-env Secret from this file on every deploy.
 #   4. Adds the deploy-transigen hook to /etc/webhook/hooks.json and restarts
 #      the webhook service.
 #   5. Runs the first deploy.
@@ -82,17 +83,17 @@ log "the transigen database from backup."
 
 # --- 3. App secrets ----------------------------------------------------------
 
-SECRETS_FILE="${APP_DIR}/deploy/k8s/overlays/prod/secrets.yaml"
-if [ -f "${SECRETS_FILE}" ]; then
-  log "Secrets file already exists at ${SECRETS_FILE}; leaving it as-is"
+ENV_FILE="${APP_DIR}/deploy/env.prod"
+if [ -f "${ENV_FILE}" ]; then
+  log "Env file already exists at ${ENV_FILE}; leaving it as-is"
 else
-  log "Creating ${SECRETS_FILE} from the example (DB password + AUTH_SECRET filled)"
+  log "Creating ${ENV_FILE} from env.prod.example (DB password + AUTH_SECRET filled)"
   AUTH_SECRET_VALUE="$(openssl rand -base64 32)"
   sed -e "s|replace-with-transigen-db-password|${TRANSIGEN_DB_PASSWORD}|" \
       -e "s|replace-with-openssl-rand-base64-32|${AUTH_SECRET_VALUE}|" \
-      "${APP_DIR}/deploy/k8s/overlays/prod/transigen-env.example.yaml" > "${SECRETS_FILE}"
-  chmod 600 "${SECRETS_FILE}"
-  log "NOTE: AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are still placeholders in ${SECRETS_FILE}."
+      "${APP_DIR}/deploy/env.prod.example" > "${ENV_FILE}"
+  chmod 600 "${ENV_FILE}"
+  log "NOTE: AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are still placeholders in ${ENV_FILE}."
   log "Fill them in (Google Cloud Console OAuth client) or sign-in will not work."
 fi
 
@@ -133,5 +134,5 @@ log "  2. Add a GitHub webhook on the transigen repo:"
 log "     URL http://<server-ip>:9000/hooks/deploy-transigen, content type json,"
 log "     secret = the WEBHOOK_SECRET you used, push events only."
 log "  3. In the Google OAuth client, add https://${TRANSIGEN_HOST}/api/auth/callback/google"
-log "     as an authorized redirect URI, and fill AUTH_GOOGLE_* in ${SECRETS_FILE},"
+log "     as an authorized redirect URI, and fill AUTH_GOOGLE_* in ${ENV_FILE},"
 log "     then re-run ${APP_DIR}/deploy/deploy.sh."

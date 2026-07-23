@@ -1,7 +1,9 @@
 # Staging overlay: upstream Kubernetes (minikube), namespace transigen-staging,
 # locally built image, plain-HTTP ingress on transigen.staging.localhost (a
 # host distinct from gelp's staging.localhost — the two apps share the same
-# local cluster), in-cluster shared Postgres, and dev secrets.
+# local cluster), and the in-cluster shared Postgres. The transigen-env Secret
+# is NOT a kustomize resource: stage.sh creates it from deploy/env.staging
+# (kubectl create secret --from-env-file) — no Secret YAML anywhere.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -10,7 +12,6 @@ namespace: transigen-staging
 resources:
   - namespace.yaml
   - ../../base
-  - secrets.yaml
 
 # stage.sh builds and loads this exact tag into minikube.
 images:

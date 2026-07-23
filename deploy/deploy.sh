@@ -105,8 +105,9 @@ fi
 # 4. Apply the prod Kustomize overlay. The rendered manifests contain
 #    ${TRANSIGEN_HOST} placeholders (in the Ingress) that need shell
 #    substitution before they're valid for kubectl. Secrets are NOT part of
-#    the overlay: the real transigen-env value is applied from a server-local
-#    secrets.yaml.
+#    the overlay: real values live only in the gitignored deploy/env.prod
+#    (written by setup-app.sh) and the transigen-env Secret is created from
+#    it here — no Secret YAML anywhere.
 # ---------------------------------------------------------------------------
 PROD_OVERLAY="${SCRIPT_DIR}/k8s/overlays/prod"
 echo "==> Applying prod overlay from ${PROD_OVERLAY}"
@@ -114,20 +115,22 @@ echo "==> Applying prod overlay from ${PROD_OVERLAY}"
 # Ensure the namespace exists before secrets are applied into it.
 kubectl apply -f "${PROD_OVERLAY}/namespace.yaml"
 
-SECRETS_FILE="${PROD_OVERLAY}/secrets.yaml"
-if [ -f "${SECRETS_FILE}" ]; then
-  echo "==> Applying local secrets.yaml (transigen-env)"
+ENV_FILE="${SCRIPT_DIR}/env.prod"
+if [ -f "${ENV_FILE}" ]; then
+  echo "==> Creating/refreshing the transigen-env Secret from deploy/env.prod"
   # shellcheck disable=SC2016  # envsubst takes the ${VAR} names literally
-  envsubst '${TRANSIGEN_HOST}' < "${SECRETS_FILE}" | kubectl apply -f -
+  kubectl -n transigen create secret generic transigen-env \
+    --from-env-file=<(envsubst '${TRANSIGEN_HOST}' < "${ENV_FILE}") \
+    --dry-run=client -o yaml | kubectl apply -f -
 elif kubectl get secret transigen-env -n transigen >/dev/null 2>&1; then
-  echo "==> Secret transigen-env already exists, leaving it as-is"
+  echo "==> deploy/env.prod not found; existing transigen-env Secret left as-is"
 else
   echo "##############################################################"
   echo "# WARNING: the transigen-env secret is missing and no"
-  echo "# ${SECRETS_FILE}"
+  echo "# ${ENV_FILE}"
   echo "# was found. The app will not start until it exists."
-  echo "# Copy transigen-env.example.yaml to secrets.yaml in that directory,"
-  echo "# fill in real values, then re-run this script."
+  echo "# Copy deploy/env.prod.example to deploy/env.prod, fill in real"
+  echo "# values (chmod 600), then re-run this script."
   echo "# Continuing deployment without it."
   echo "##############################################################"
 fi

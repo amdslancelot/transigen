@@ -36,11 +36,15 @@ See the root `README.md` setup section.
   over `kubectl exec`. The data-plane manifests themselves live in the
   snoopy_home repo, not here.
 - `k8s/overlays/staging/` — minikube, namespace `transigen-staging`, image tag
-  `staging`, host `transigen.staging.localhost`, committed dev secrets.
+  `staging`, host `transigen.staging.localhost`.
 - `k8s/overlays/prod/` — shared k3s server, namespace `transigen`, image tag
   `latest`, host `${TRANSIGEN_HOST}` with TLS via the existing
-  `letsencrypt-prod` ClusterIssuer. Secrets applied from a server-local
-  `secrets.yaml` (template: `transigen-env.example.yaml`).
+  `letsencrypt-prod` ClusterIssuer.
+- `env.staging` / `env.prod.example` — values for the `transigen-env` Secret,
+  following snoopy_home's password policy: real passwords live only in the
+  gitignored `deploy/env.prod` on the server (dev/test values in `env.staging`
+  are committed), and the Secret is created from the env file at deploy time —
+  no Secret YAML anywhere.
 - `stage.sh` — build with podman → load into minikube → verify the shared
   data plane + provision the transigen DB → apply the staging overlay.
 - `deploy.sh` — prod build-and-deploy on the server; run by the webhook on
@@ -71,7 +75,7 @@ deploy/stage.sh
 Reach the app with `kubectl -n transigen-staging port-forward svc/transigen 3000:80`
 (then <http://localhost:3000>), or via `minikube tunnel` on
 <http://transigen.staging.localhost>. Real Google sign-in on staging needs a
-real OAuth client in `k8s/overlays/staging/secrets.yaml` (see its comments).
+real OAuth client in `deploy/env.staging` (see its comments).
 
 ## Prod (shared k3s server)
 
@@ -86,9 +90,9 @@ bash deploy/setup-app.sh
 
 Then: point DNS at the server, add the GitHub webhook
 (`http://<server-ip>:9000/hooks/deploy-transigen`, push events, the same
-secret), and fill the `AUTH_GOOGLE_*` values in the server-local
-`deploy/k8s/overlays/prod/secrets.yaml`. Every push to `main` afterwards
-rebuilds the image on the server and rolls the deployment.
+secret), and fill the `AUTH_GOOGLE_*` values in the server-local gitignored
+`deploy/env.prod`, then re-run `deploy/deploy.sh`. Every push to `main`
+afterwards rebuilds the image on the server and rolls the deployment.
 
 Known gaps inherited from the gelp pattern, unchanged: no automated rollback
 (use `kubectl rollout undo` by hand) and no deploy lock around concurrent
