@@ -1,17 +1,20 @@
 #!/bin/bash
 # Provision one database + one least-privilege login role per app on the shared
-# server. This runs automatically the first time the data volume initialises,
-# via /docker-entrypoint-initdb.d. It is idempotent, so you can also re-run it by
-# hand to add a new app or rotate a password later:
+# data-plane Postgres. The data plane itself (a single postgres:17 Deployment +
+# Service in namespace `data`) is owned by the snoopy_home repo; this script
+# only adds/refreshes an app's slice inside it. It runs INSIDE the postgres
+# pod — pipe it in over kubectl exec. Idempotent: safe to re-run to add a new
+# app or rotate a password:
 #
-#   kubectl -n data exec -it postgres-0 -- \
-#     env PROVISION_APPS="gelp" GELP_DB_PASSWORD=... \
-#     bash /docker-entrypoint-initdb.d/10-provision-apps.sh
+#   kubectl -n data exec -i deploy/postgres -- \
+#     env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD=... \
+#     bash -s < deploy/provision-db.sh
 #
-# Which apps to provision is set per environment via PROVISION_APPS (a space-
-# separated list), so staging (gelp only) and prod (all apps) share this one
-# script. For each <app> it creates database <app>, role <app>_rw, and reads the
-# role password from the env var <APP>_DB_PASSWORD (all from postgres-secret).
+# For each <app> in PROVISION_APPS (a space-separated list) it creates database
+# <app>, role <app>_rw, and reads the role password from the env var
+# <APP>_DB_PASSWORD. Note the shared Postgres has no automatic re-provisioning:
+# if its data volume is ever re-initialised, re-run this script (and restore
+# from backup) for every app.
 set -euo pipefail
 
 admin="${POSTGRES_USER:-postgres}"
@@ -19,7 +22,7 @@ psql_admin() { psql -v ON_ERROR_STOP=1 --username "$admin" --dbname postgres "$@
 
 apps="${PROVISION_APPS:-}"
 if [ -z "$apps" ]; then
-  echo "provision: PROVISION_APPS is empty — set it on the StatefulSet (e.g. \"gelp\")" >&2
+  echo "provision: PROVISION_APPS is empty — pass it in the kubectl exec env (e.g. \"transigen\")" >&2
   exit 1
 fi
 
@@ -36,7 +39,7 @@ EOSQL
 provision() {
   local db="$1" role="$2" pw="$3"
   if [ -z "${pw:-}" ]; then
-    echo "provision: missing password for role '$role' (check the postgres-secret keys)" >&2
+    echo "provision: missing password for role '$role' (pass <APP>_DB_PASSWORD in the exec env)" >&2
     exit 1
   fi
 

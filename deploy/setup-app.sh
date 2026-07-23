@@ -2,8 +2,9 @@
 #
 # One-time setup that adds Transigen to an EXISTING gelp-style k3s server
 # (the box bootstrapped by gelp's deploy/setup-server.sh, which already runs
-# k3s, Traefik, cert-manager, the adnanh/webhook service, and the shared
-# Postgres data plane). Idempotent: safe to re-run.
+# k3s, Traefik, cert-manager, and the adnanh/webhook service; the shared
+# Postgres data plane in namespace `data` is owned by the snoopy_home repo,
+# see its docs/prod-k3s-runbook.md). Idempotent: safe to re-run.
 #
 # Run as root on the server:
 #
@@ -16,9 +17,10 @@
 #
 # What it does:
 #   1. Clones/updates the repo at /opt/transigen and writes /opt/transigen/deploy.env.
-#   2. Provisions the `transigen` database/role in the shared Postgres and
-#      records TRANSIGEN_DB_PASSWORD in the server-local postgres-secret file
-#      owned by the gelp checkout (so a future volume re-init keeps transigen).
+#   2. Provisions the `transigen` database/role in the shared Postgres
+#      (deploy/provision-db.sh piped into the postgres pod). There is no
+#      automatic re-provisioning: if the Postgres volume is ever
+#      re-initialised, re-run this script and restore from backup.
 #   3. Creates deploy/k8s/overlays/prod/secrets.yaml from the example with the
 #      DB password and a generated AUTH_SECRET filled in (Google OAuth values
 #      stay placeholders — fill them in before sign-in will work).
@@ -39,7 +41,6 @@ die() { echo "[setup-app] ERROR: $*" >&2; exit 1; }
 REPO_URL="${REPO_URL:-https://github.com/amdslancelot/transigen.git}"
 
 APP_DIR=/opt/transigen
-GELP_DATA_SECRET=/opt/gelp/deploy/k8s/data/overlays/prod/postgres-secret.yaml
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 command -v kubectl >/dev/null 2>&1 || die "kubectl not found — is this the gelp k3s server?"
@@ -66,31 +67,18 @@ chmod 600 "${APP_DIR}/deploy.env"
 # --- 2. Database provisioning in the shared Postgres ------------------------
 
 log "Waiting for the shared Postgres (namespace data)"
-kubectl get statefulset postgres -n data >/dev/null 2>&1 \
-  || die "statefulset/postgres not found in namespace data — run gelp's deploy first."
-kubectl rollout status statefulset/postgres -n data --timeout=180s
+kubectl get deployment postgres -n data >/dev/null 2>&1 \
+  || die "deployment/postgres not found in namespace data — it is owned by the snoopy_home repo (docs/prod-k3s-runbook.md)."
+kubectl rollout status deployment/postgres -n data --timeout=180s
 
 log "Provisioning database 'transigen' / role 'transigen_rw' (idempotent)"
-kubectl -n data exec postgres-0 -- \
+kubectl -n data exec -i deploy/postgres -- \
   env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD="${TRANSIGEN_DB_PASSWORD}" \
-  bash /docker-entrypoint-initdb.d/10-provision-apps.sh
+  bash -s < "${APP_DIR}/deploy/provision-db.sh"
 
-if [ -f "${GELP_DATA_SECRET}" ]; then
-  if grep -q "TRANSIGEN_DB_PASSWORD" "${GELP_DATA_SECRET}"; then
-    log "TRANSIGEN_DB_PASSWORD already recorded in ${GELP_DATA_SECRET}"
-  else
-    log "Appending TRANSIGEN_DB_PASSWORD to ${GELP_DATA_SECRET}"
-    # Guard against a file that ends without a newline, which would glue the
-    # appended key onto the previous line and break the YAML.
-    [ -n "$(tail -c1 "${GELP_DATA_SECRET}")" ] && printf '\n' >> "${GELP_DATA_SECRET}"
-    printf '  TRANSIGEN_DB_PASSWORD: "%s"\n' "${TRANSIGEN_DB_PASSWORD}" >> "${GELP_DATA_SECRET}"
-    kubectl apply -n data -f "${GELP_DATA_SECRET}"
-  fi
-else
-  log "WARNING: ${GELP_DATA_SECRET} not found. The database is provisioned, but if the"
-  log "Postgres volume is ever re-initialised, transigen will not be re-provisioned"
-  log "automatically. Add TRANSIGEN_DB_PASSWORD to gelp's server-local postgres-secret."
-fi
+log "NOTE: the shared Postgres has no automatic re-provisioning. If its data"
+log "volume is ever re-initialised, re-run this script (idempotent) and restore"
+log "the transigen database from backup."
 
 # --- 3. App secrets ----------------------------------------------------------
 

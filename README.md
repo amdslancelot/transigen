@@ -23,13 +23,15 @@ for provisioning only, never an app credential).
 
 ```sh
 minikube start --driver=vfkit                          # if not already running
-deploy/stage.sh                                        # brings up the data plane + provisions transigen
+# Data plane up? It is owned by snoopy_home (deploy/setup-minikube.sh there).
+kubectl -n data exec -i deploy/postgres -- \
+  env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD="transigen" \
+  bash -s < deploy/provision-db.sh                     # once, idempotent
 kubectl -n data port-forward svc/postgres 54321:5432 & # dev tunnel; keep it running
 ```
 
-If the shared Postgres is already up (e.g. another app deployed it), only the
-port-forward is needed. Any other PostgreSQL 15+ works too — just point
-`DATABASE_URL` at it.
+If transigen is already provisioned, only the port-forward is needed. Any
+other PostgreSQL 15+ works too — just point `DATABASE_URL` at it.
 
 ### 3. Configure environment variables
 

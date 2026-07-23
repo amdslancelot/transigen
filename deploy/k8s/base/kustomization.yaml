@@ -3,8 +3,8 @@
 # namespace or an environment-specific value.
 #
 # The database is NOT here: transigen connects to the shared Postgres in the
-# `data` namespace (see deploy/k8s/data). Its DATABASE_URL comes from the
-# transigen-env Secret each overlay supplies.
+# `data` namespace (owned by the snoopy_home repo; see deploy/README.md). Its
+# DATABASE_URL comes from the transigen-env Secret each overlay supplies.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 

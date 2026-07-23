@@ -34,19 +34,22 @@ echo "==> Loading ${IMAGE} into minikube"
 podman tag "${IMAGE}" "docker.io/library/${IMAGE}"
 podman save "docker.io/library/${IMAGE}" | minikube image load -
 
-echo "==> Applying shared data plane (Postgres in namespace 'data')"
-kubectl apply -k deploy/k8s/data/overlays/staging
+# The shared data plane (a postgres:17 Deployment + Service in namespace
+# `data`) is owned by the snoopy_home repo — snoopy_home/deploy/setup-minikube.sh
+# stands it up on this minikube. Transigen only provisions its own slice into it.
+echo "==> Preflight: shared Postgres in namespace 'data'"
+if ! kubectl get deployment postgres -n data >/dev/null 2>&1; then
+  echo "ERROR: deployment/postgres not found in namespace 'data'." >&2
+  echo "The shared data plane is provisioned by the snoopy_home repo:" >&2
+  echo "  snoopy_home/deploy/setup-minikube.sh" >&2
+  exit 1
+fi
+kubectl rollout status deployment/postgres -n data --timeout=180s
 
-echo "==> Waiting for the shared Postgres to become ready"
-kubectl rollout status statefulset/postgres -n data --timeout=180s
-
-# The init script only runs automatically on a fresh data volume; re-running it
-# by hand is idempotent and covers a volume that was initialised before
-# transigen existed (e.g. by gelp's own stage.sh).
 echo "==> Provisioning the transigen database/role (idempotent)"
-kubectl -n data exec postgres-0 -- \
+kubectl -n data exec -i deploy/postgres -- \
   env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD="transigen" \
-  bash /docker-entrypoint-initdb.d/10-provision-apps.sh
+  bash -s < "${SCRIPT_DIR}/provision-db.sh"
 
 echo "==> Applying staging app overlay"
 kubectl apply -k deploy/k8s/overlays/staging

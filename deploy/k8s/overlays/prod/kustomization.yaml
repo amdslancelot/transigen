@@ -3,9 +3,9 @@
 #
 # The transigen-env Secret is NOT committed here — deploy/deploy.sh applies it
 # from a server-local file (see deploy/README.md); the database is the shared
-# Postgres in the `data` namespace, whose manifests and secret are owned by the
-# gelp checkout on the server (deploy/k8s/data/README.md). The
-# letsencrypt-prod ClusterIssuer is likewise owned by the gelp deployment —
+# Postgres in the `data` namespace, whose manifests are owned by the
+# snoopy_home checkout on the server (its docs/prod-k3s-runbook.md). The
+# letsencrypt-prod ClusterIssuer is owned by the gelp deployment —
 # this overlay only references it by name. ${TRANSIGEN_HOST} is filled by
 # envsubst in deploy.sh after `kubectl kustomize` renders this overlay.
 apiVersion: kustomize.config.k8s.io/v1beta1

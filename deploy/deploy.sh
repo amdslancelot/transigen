@@ -5,10 +5,11 @@
 # listener (on every push to main) and by hand on the server for a manual
 # redeploy.
 #
-# The shared infrastructure — the k3s cluster, Traefik, cert-manager, the
-# letsencrypt-prod ClusterIssuer, and the Postgres data plane in namespace
-# `data` — is owned by the gelp checkout on the server (/opt/gelp). This
-# script only verifies those exist; it deploys the transigen app on top.
+# The shared infrastructure is owned by other checkouts on the server: the k3s
+# cluster, Traefik, cert-manager, and the letsencrypt-prod ClusterIssuer by
+# gelp (/opt/gelp, its setup-server.sh), and the Postgres data plane in
+# namespace `data` by snoopy_home (its docs/prod-k3s-runbook.md). This script
+# only verifies those exist; it deploys the transigen app on top.
 #
 # Usage: deploy/deploy.sh   (no arguments)
 
@@ -53,15 +54,16 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Verify the shared infrastructure this app depends on (owned by gelp).
+# 2. Verify the shared infrastructure this app depends on.
 # ---------------------------------------------------------------------------
-if ! kubectl get statefulset postgres -n data >/dev/null 2>&1; then
-  echo "ERROR: the shared Postgres (statefulset/postgres in namespace 'data') is missing." >&2
-  echo "It is owned by the gelp checkout on this server — run /opt/gelp/deploy/deploy.sh first." >&2
+if ! kubectl get deployment postgres -n data >/dev/null 2>&1; then
+  echo "ERROR: the shared Postgres (deployment/postgres in namespace 'data') is missing." >&2
+  echo "It is owned by the snoopy_home checkout on this server — see" >&2
+  echo "snoopy_home/docs/prod-k3s-runbook.md." >&2
   exit 1
 fi
 echo "==> Waiting for the shared Postgres to be ready"
-kubectl rollout status statefulset/postgres -n data --timeout=180s
+kubectl rollout status deployment/postgres -n data --timeout=180s
 
 if ! kubectl get clusterissuer letsencrypt-prod >/dev/null 2>&1; then
   echo "WARNING: ClusterIssuer letsencrypt-prod not found (owned by the gelp deployment)."
