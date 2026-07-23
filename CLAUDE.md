@@ -39,7 +39,8 @@ Next.js 15 + React 19 + PostgreSQL（raw SQL via pg，migrations 在 db/migratio
 
 - `docs/design/audio-cache-feasibility.md` — 「先下載音檔+記憶體播放」架構評估（Phase 1/2 分期、風險、client cache 規則）。動 transition 精準度或播放架構前必讀。
 - `docs/design/webaudio-playback-plan.md` — **可續接的執行計畫**（2026-07-21 定案）：把播放音源從 iframe 換到 Web Audio，走「fetch-once + 有上限的 LRU cache」（沿用 worker 既有 yt-dlp 抽取、不新增 YouTube 請求）。含 HookLab 研究結論、三方權衡、Step 0 先驗抽取健康度、丟棄式 spike。要接手做 Web Audio 播放先讀這份。
-- `deploy/README.md` — 部署 runbook（沿用 gelp 的模式）：staging 在本機 minikube（`deploy/stage.sh`），prod 在與 gelp 共用的 OCI k3s 機器（push webhook 觸發 `deploy/deploy.sh`），共用 Postgres data plane。動部署前必讀。`docs/design/deploy-oci-cicd-plan.md` 已作廢（superseded banner 在檔頭）。
+- `deploy/README.md` — 部署 runbook（沿用 gelp 的模式）：staging 在本機 minikube（`deploy/stage.sh`），prod 在與 gelp 共用的 OCI k3s 機器（push webhook 觸發 `deploy/deploy.sh`），共用 Postgres data plane（manifests 由 snoopy_home repo 擁有）。動部署前必讀。`docs/design/deploy-oci-cicd-plan.md` 已作廢（superseded banner 在檔頭）。
+- `learning/postgres-deployment-vs-statefulset-2026-07-23.md` — 為何共用 Postgres 是 Deployment 不是 StatefulSet、data-plane manifests 收斂到 snoopy_home 的決策記錄。動 data plane 前先讀。
 
 ## 制度檔（按需讀）
 
