@@ -22,6 +22,10 @@ __pycache__/
 
 # Personal working notes
 worklog.md
+plan.md
+
+# Local backup copies (may contain credentials — e.g. .env.local.bak, worker/.env.bak)
+*.bak
 
 # OS
 .DS_Store
@@ -34,6 +38,7 @@ terraform.tfvars
 
 # Deploy secrets and generated kubeconfig (deploy/)
 deploy/.env.production
+deploy/env.prod
 deploy/kubeconfig
 
 # One-time Supabase data dump (contains user data; restore artifact, not source)
