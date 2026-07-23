@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { query } from "@/lib/db";
 import { buildRoomPlaybackEdges, computeRoomSetLengthSec } from "@/lib/roomPlaybackEdges";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { coerceProposalSeconds, formatMinSec } from "@/lib/timeInput";
+import { isUuid } from "@/lib/validate";
 import { formatSec } from "@/lib/youtube";
 import { RoomChainPicker } from "@/components/RoomChainPicker";
 import { RoomFullSetPlayer } from "@/components/RoomFullSetPlayer";
@@ -49,10 +50,15 @@ function formatArtistTrack(meta: YoutubeListMeta | undefined, videoId: string): 
 export default async function RoomPage(props: { params: Params }) {
   const user = await requireUser();
   const { roomId } = await props.params;
-  const supabase = await getSupabaseServerClient();
 
-  const { data: room } = await supabase.from("rooms").select("*").eq("id", roomId).single();
-  const typedRoom = room as Room | null;
+  const roomRows = isUuid(roomId)
+    ? await query<Room>(
+        `select id, owner_id, title, slug, start_media, play_count, created_at::text as created_at
+         from rooms where id = $1`,
+        [roomId],
+      )
+    : [];
+  const typedRoom = roomRows[0] ?? null;
 
   if (!typedRoom) {
     return (
@@ -62,27 +68,45 @@ export default async function RoomPage(props: { params: Params }) {
     );
   }
 
-  await supabase.from("room_members").upsert({ room_id: roomId, user_id: user.id });
+  await query(
+    `insert into room_members (room_id, user_id) values ($1, $2) on conflict do nothing`,
+    [roomId, user.id],
+  );
 
-  const { data: itemsRaw } = await supabase
-    .from("room_set_items")
-    .select("*")
-    .eq("room_id", roomId)
-    .order("position", { ascending: true });
-  const items = (itemsRaw ?? []) as RoomSetItem[];
+  const items = await query<RoomSetItem>(
+    `select id, room_id, position, media, transition_pair_id_from_prev,
+            best_proposal_id_from_prev, created_at::text as created_at
+     from room_set_items
+     where room_id = $1
+     order by position asc`,
+    [roomId],
+  );
 
   const proposalIds = items
     .map((i) => i.best_proposal_id_from_prev)
     .filter((id): id is string => typeof id === "string");
   let proposalsById = new Map<string, ProposalWithPresetRow>();
   if (proposalIds.length > 0) {
-    const { data: proposalsRaw } = await supabase
-      .from("transition_proposals")
-      .select(
-        "id,pair_id,proposed_by,end_prev_sec,start_next_sec,preset_id,prev_bpm,params,note,created_at,transition_presets(code)",
-      )
-      .in("id", proposalIds);
-    const proposals = (proposalsRaw ?? []).map(normalizeProposalRow);
+    const proposalsRaw = await query<TransitionProposal & { preset_code: string | null }>(
+      `select tp.id, tp.pair_id, tp.proposed_by,
+              tp.end_prev_sec::float8 as end_prev_sec,
+              tp.start_next_sec::float8 as start_next_sec,
+              tp.preset_id,
+              tp.prev_bpm::float8 as prev_bpm,
+              tp.params, tp.note,
+              tp.created_at::text as created_at,
+              pr.code as preset_code
+       from transition_proposals tp
+       left join transition_presets pr on pr.id = tp.preset_id
+       where tp.id = any($1::uuid[])`,
+      [proposalIds],
+    );
+    const proposals = proposalsRaw.map(({ preset_code, ...row }) =>
+      normalizeProposalRow({
+        ...row,
+        transition_presets: preset_code ? { code: preset_code } : null,
+      }),
+    );
     proposalsById = new Map(proposals.map((p) => [p.id, p]));
   }
 
@@ -101,14 +125,13 @@ export default async function RoomPage(props: { params: Params }) {
 
   const trackAnalysisMap = new Map<string, { bpm: number; beat_offset: number }>();
   if (allVideoIds.length > 0) {
-    const { data: analysisRows } = await supabase
-      .from("track_analysis")
-      .select("video_id, bpm, beat_offset")
-      .in("video_id", allVideoIds);
-    for (const row of analysisRows ?? []) {
-      const id = String(row.video_id ?? "");
-      if (id && row.bpm != null) {
-        trackAnalysisMap.set(id, { bpm: Number(row.bpm), beat_offset: Number(row.beat_offset ?? 0) });
+    const analysisRows = await query<{ video_id: string; bpm: number | null; beat_offset: number | null }>(
+      `select video_id, bpm, beat_offset from track_analysis where video_id = any($1::text[])`,
+      [allVideoIds],
+    );
+    for (const row of analysisRows) {
+      if (row.video_id && row.bpm != null) {
+        trackAnalysisMap.set(row.video_id, { bpm: Number(row.bpm), beat_offset: Number(row.beat_offset ?? 0) });
       }
     }
   }
@@ -117,16 +140,14 @@ export default async function RoomPage(props: { params: Params }) {
 
   const trackMetaById = new Map<string, YoutubeListMeta>();
   if (allVideoIds.length > 0) {
-    const { data: cacheRows } = await supabase
-      .from("youtube_video_cache")
-      .select("video_id,title,channel_title")
-      .in("video_id", allVideoIds);
-    for (const row of cacheRows ?? []) {
-      const id = String(row.video_id ?? "");
-      if (!id) continue;
-      trackMetaById.set(id, {
-        title: (row.title as string) ?? "",
-        channelTitle: (row.channel_title as string) ?? "",
+    const cacheRows = await query<{ video_id: string; title: string | null; channel_title: string | null }>(
+      `select video_id, title, channel_title from youtube_video_cache where video_id = any($1::text[])`,
+      [allVideoIds],
+    );
+    for (const row of cacheRows) {
+      trackMetaById.set(row.video_id, {
+        title: row.title ?? "",
+        channelTitle: row.channel_title ?? "",
       });
     }
   }

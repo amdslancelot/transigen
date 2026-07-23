@@ -34,7 +34,7 @@ function presetCodeFromRow(row: ProposalWithPresetRow): string {
   return tp?.code ?? "hard_cut";
 }
 
-/** Supabase embed shape: `transition_presets` nested on proposal row */
+/** Joined preset shape: `transition_presets` nested on proposal row */
 export function buildRoomPlaybackEdges(
   room: Room,
   items: RoomSetItem[],

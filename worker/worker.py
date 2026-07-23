@@ -6,39 +6,38 @@ import traceback
 
 import librosa
 import numpy as np
+import psycopg
+from psycopg.types.json import Jsonb
 from dotenv import load_dotenv
-from supabase import create_client
 
 load_dotenv()
 
-SUPABASE_URL = os.environ["SUPABASE_URL"]
-SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+DATABASE_URL = os.environ["DATABASE_URL"]
 POLL_INTERVAL = 5  # seconds
 
-db = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
+def poll_one(conn):
+    # pick oldest pending job
+    with conn.cursor() as cur:
+        cur.execute(
+            "select id, video_id from ingest_jobs"
+            " where status = 'pending' order by created_at asc limit 1"
+        )
+        row = cur.fetchone()
+    return {"id": row[0], "video_id": row[1]} if row else None
 
 
-def poll_one():
-    # line 18: pick oldest pending job
-    row = (
-        db.table("ingest_jobs")
-        .select("id, video_id")
-        .eq("status", "pending")
-        .order("created_at", desc=False)
-        .limit(1)
-        .execute()
-    )
-    return row.data[0] if row.data else None
-
-
-def mark(job_id, status, **extra):
-    payload = {"status": status, "updated_at": "now()"}
-    payload.update(extra)
-    db.table("ingest_jobs").update(payload).eq("id", job_id).execute()
+def mark(conn, job_id, status, error_message=None):
+    # updated_at is maintained by a DB trigger; the same trigger NOTIFYs the app.
+    with conn.cursor() as cur:
+        cur.execute(
+            "update ingest_jobs set status = %s, error_message = %s where id = %s",
+            (status, error_message, job_id),
+        )
 
 
 def download(video_id):
-    # line 33: download audio to /tmp via yt-dlp
+    # download audio to /tmp via yt-dlp
     out_path = f"/tmp/{video_id}.m4a"
     subprocess.run(
         [
@@ -65,23 +64,40 @@ def analyze(audio_path: str) -> dict:
     return {"bpm": bpm, "beat_offset": beat_offset, "beats": beat_times, "duration": duration}
 
 
-def write_analysis(video_id, result):
-    # line 62: upsert track_analysis, then mark job done
-    db.table("track_analysis").upsert({"video_id": video_id, **result}).execute()
+def write_analysis(conn, video_id, result):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            insert into track_analysis (video_id, bpm, beat_offset, beats, duration)
+            values (%s, %s, %s, %s, %s)
+            on conflict (video_id) do update set
+              bpm = excluded.bpm,
+              beat_offset = excluded.beat_offset,
+              beats = excluded.beats,
+              duration = excluded.duration
+            """,
+            (
+                video_id,
+                result["bpm"],
+                result["beat_offset"],
+                Jsonb(result["beats"]),
+                result["duration"],
+            ),
+        )
 
 
-def process(job):
+def process(conn, job):
     video_id = job["video_id"]
     job_id = job["id"]
     path = f"/tmp/{video_id}.m4a"
     try:
-        mark(job_id, "processing")
-        download(video_id)       # line 71: download
-        result = analyze(path)   # line 72: analyze
-        write_analysis(video_id, result)  # line 73: write
-        mark(job_id, "done")
+        mark(conn, job_id, "processing")
+        download(video_id)
+        result = analyze(path)
+        write_analysis(conn, video_id, result)
+        mark(conn, job_id, "done")
     except Exception as e:
-        mark(job_id, "failed", error_message=str(e)[:500])
+        mark(conn, job_id, "failed", error_message=str(e)[:500])
         traceback.print_exc()
     finally:
         for f in glob.glob(f"/tmp/{video_id}.*"):
@@ -90,17 +106,26 @@ def process(job):
 
 def main():
     print("Worker started. Polling every", POLL_INTERVAL, "s.")
+    conn = None
     while True:
         try:
-            job = poll_one()
+            if conn is None or conn.closed:
+                conn = psycopg.connect(DATABASE_URL, autocommit=True)
+            job = poll_one(conn)
             if job:
                 print(f"Processing job {job['id']} video_id={job['video_id']}")
-                process(job)
+                process(conn, job)
             else:
                 time.sleep(POLL_INTERVAL)
         except Exception as e:
-            # ponytail: catch-all keeps loop alive on DB hiccup; individual job errors handled in process()
+            # catch-all keeps the loop alive on DB hiccups; reconnect next round
             print("Poll error:", e)
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
+            conn = None
             time.sleep(POLL_INTERVAL)
 
 

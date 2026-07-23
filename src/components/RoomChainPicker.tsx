@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { confirmRoomChain } from "@/app/actions";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { confirmRoomChain, fetchTransitionDestinations, fetchVideoLabels } from "@/app/actions";
 
 type Props = {
   roomId: string;
@@ -14,46 +13,6 @@ type Props = {
   /** Known labels from server (set list / cache); other IDs load client-side. */
   initialTrackLabels?: Record<string, string>;
 };
-
-function rowToLabel(row: { title?: string | null; channel_title?: string | null }, id: string): string {
-  const title = (row.title ?? "").trim();
-  const ch = (row.channel_title ?? "").trim();
-  if (ch && title) return `${ch} - ${title}`;
-  if (title) return title;
-  return id;
-}
-
-async function fetchDestinationIds(fromVideoId: string): Promise<string[]> {
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("transition_pairs")
-    .select("to_media")
-    .eq("from_media->>provider", "youtube")
-    .eq("from_media->>videoId", fromVideoId);
-
-  if (error) throw error;
-  const ids = (data ?? [])
-    .map((row: { to_media: { videoId?: string } }) => row.to_media?.videoId)
-    .filter((v): v is string => typeof v === "string" && v.length > 0);
-  return Array.from(new Set(ids));
-}
-
-async function fetchVideoTitles(ids: string[]): Promise<Record<string, string>> {
-  if (ids.length === 0) return {};
-  const supabase = getSupabaseBrowserClient();
-  const { data, error } = await supabase
-    .from("youtube_video_cache")
-    .select("video_id,title,channel_title")
-    .in("video_id", ids);
-  if (error) return {};
-  const out: Record<string, string> = {};
-  for (const row of data ?? []) {
-    const id = String(row.video_id ?? "");
-    if (!id) continue;
-    out[id] = rowToLabel(row, id);
-  }
-  return out;
-}
 
 export function RoomChainPicker({
   roomId,
@@ -92,10 +51,14 @@ export function RoomChainPicker({
     if (list.length === 0) return;
     for (const id of list) titleFetchAttemptedRef.current.add(id);
     let cancelled = false;
-    void fetchVideoTitles(list).then((got) => {
-      if (cancelled) return;
-      setFetchedLabels((prev) => ({ ...prev, ...got }));
-    });
+    void fetchVideoLabels(list)
+      .then((got) => {
+        if (cancelled) return;
+        setFetchedLabels((prev) => ({ ...prev, ...got }));
+      })
+      .catch(() => {
+        /* labels are cosmetic; fall back to raw ids */
+      });
     return () => {
       cancelled = true;
     };
@@ -109,7 +72,7 @@ export function RoomChainPicker({
       inFlight.current.add(id);
       setLoadingCount((n) => n + 1);
       setErr(null);
-      void fetchDestinationIds(id)
+      void fetchTransitionDestinations(id)
         .then((ids) => {
           if (guard !== listFetchGuard.current) return;
           setCache((p) => (p[id] ? p : { ...p, [id]: ids }));

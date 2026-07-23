@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { query as sql } from "@/lib/db";
 import { youtubeMqThumbnailUrl } from "@/lib/youtubeThumb";
 import type { Room } from "@/types/db";
 import type { MediaRef } from "@/types/media";
@@ -39,23 +39,26 @@ export default async function RoomsIndexPage(props: { searchParams: Params }) {
   const page = Math.max(0, parseInt(sp.page ?? "0", 10) || 0);
   const offset = page * PAGE_SIZE;
 
-  const supabase = await getSupabaseServerClient();
+  let rooms: DirectoryRow[] = [];
+  let total = 0;
+  let listErrMsg: string | undefined;
+  try {
+    const [rows, countRows] = await Promise.all([
+      sql<DirectoryRow>(
+        `select id, owner_id, title, slug, start_media, created_at::text as created_at, play_count
+         from list_rooms_directory($1, $2, $3)`,
+        [query, PAGE_SIZE, offset],
+      ),
+      sql<{ count: unknown }>(`select count_rooms_directory($1) as count`, [query]),
+    ]);
+    rooms = rows;
+    total = parseTotalCount(countRows[0]?.count);
+  } catch (e: unknown) {
+    listErrMsg = e instanceof Error ? e.message : "Failed to load rooms.";
+  }
 
-  const { data: rows, error: listErr } = await supabase.rpc("list_rooms_directory", {
-    search_q: query,
-    result_limit: PAGE_SIZE,
-    result_offset: offset,
-  });
-
-  const { data: countRaw, error: countErr } = await supabase.rpc("count_rooms_directory", {
-    search_q: query,
-  });
-
-  const listErrMsg = listErr?.message ?? countErr?.message;
-  const total = parseTotalCount(countRaw);
   const hasPrev = page > 0;
   const hasNext = offset + PAGE_SIZE < total;
-  const rooms = (rows ?? []) as DirectoryRow[];
 
   return (
     <main className="container col" style={{ gap: "1.25rem", paddingTop: "0.5rem" }}>
@@ -112,7 +115,7 @@ export default async function RoomsIndexPage(props: { searchParams: Params }) {
         {listErrMsg ? (
           <p style={{ color: "#f87171" }}>
             無法載入房間列表：{listErrMsg}。若尚未套用資料庫 migration，請執行{" "}
-            <code>0004_room_play_count_directory.sql</code>。
+            <code>npm run migrate</code>。
           </p>
         ) : rooms.length === 0 ? (
           <p className="muted">{query ? "沒有包含此歌名的房間。" : "尚無房間，先建立一個吧。"}</p>

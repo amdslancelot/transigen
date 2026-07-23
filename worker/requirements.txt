@@ -1,4 +1,4 @@
-supabase>=2.0.0
+psycopg[binary]>=3.2
 yt-dlp
 librosa==0.10.2.post1
 soundfile

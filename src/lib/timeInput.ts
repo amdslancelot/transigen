@@ -46,7 +46,7 @@ export function formatMinSec(sec: number | null | undefined): string {
   return `${m}:${intPart.padStart(2, "0")}${frac}`;
 }
 
-/** Supabase `numeric` may arrive as string in JSON. */
+/** Postgres `numeric` may arrive as a string. */
 export function coerceProposalSeconds(v: unknown): number {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   if (typeof v === "string" && v.trim() !== "") {

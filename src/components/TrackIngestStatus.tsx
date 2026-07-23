@@ -1,57 +1,33 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
+// Live analysis progress over SSE: the stream route LISTENs on the
+// ingest_jobs_changed Postgres channel and pushes {done,total} counts.
 export function TrackIngestStatus({ videoIds }: { videoIds: string[] }) {
   const [doneCount, setDoneCount] = useState(0);
 
   useEffect(() => {
     if (videoIds.length === 0) return;
 
-    const supabase = getSupabaseBrowserClient();
-
-    // Initial load
-    supabase
-      .from("ingest_jobs")
-      .select("status")
-      .in("video_id", videoIds)
-      .then(({ data }) => {
-        const done = (data ?? []).filter((r) => r.status === "done" || r.status === "failed").length;
-        setDoneCount(done);
-      });
-
-    // Realtime updates
-    const channel = supabase
-      .channel("ingest_jobs_status")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "ingest_jobs",
-          filter: `video_id=in.(${videoIds.join(",")})`,
-        },
-        () => {
-          // Re-query on any change — ponytail: re-fetch over diff-tracking, simpler and correct
-          supabase
-            .from("ingest_jobs")
-            .select("status")
-            .in("video_id", videoIds)
-            .then(({ data }) => {
-              const done = (data ?? []).filter((r) => r.status === "done" || r.status === "failed").length;
-              setDoneCount(done);
-            });
-        },
-      )
-      .subscribe();
+    const source = new EventSource(
+      `/api/ingest-status/stream?ids=${encodeURIComponent(videoIds.join(","))}`,
+    );
+    source.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data) as { done?: number };
+        if (typeof data.done === "number") setDoneCount(data.done);
+      } catch {
+        /* ignore malformed events */
+      }
+    };
 
     return () => {
-      supabase.removeChannel(channel);
+      source.close();
     };
   }, [videoIds]);
 
-  if (doneCount >= videoIds.length) return null;
+  if (videoIds.length === 0 || doneCount >= videoIds.length) return null;
 
   return <div className="muted">分析中 {doneCount}/{videoIds.length} 首</div>;
 }

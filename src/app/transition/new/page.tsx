@@ -3,7 +3,7 @@ import { lookupYoutubeMeta, voteProposal, type YoutubeMetaResult } from "@/app/a
 import { DeleteProposalForm } from "@/components/DeleteProposalForm";
 import { TransitionComposer } from "@/components/TransitionComposer";
 import { requireUser } from "@/lib/auth";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
+import { query } from "@/lib/db";
 import { coerceProposalSeconds, formatMinSec } from "@/lib/timeInput";
 import { extractYoutubeVideoId } from "@/lib/youtube";
 import type { ProposalWithVotes, TransitionPreset } from "@/types/db";
@@ -32,43 +32,46 @@ export default async function TransitionNewPage(props: { searchParams: SearchPar
     if (metaRes.ok) prefetchedSongAMeta = metaRes;
   }
 
-  const supabase = await getSupabaseServerClient();
-  const { data: presetsRaw } = await supabase.from("transition_presets").select("*").order("label");
-  const presets = (presetsRaw ?? []) as TransitionPreset[];
+  const presets = await query<TransitionPreset>(
+    `select id, code, label, description from transition_presets order by label`,
+  );
 
   let proposals: ProposalWithVotes[] = [];
   if (fromVideo && toVideo) {
-    const { data: pair } = await supabase
-      .from("transition_pairs")
-      .select("id")
-      .eq("from_media->>provider", "youtube")
-      .eq("from_media->>videoId", fromVideo)
-      .eq("to_media->>provider", "youtube")
-      .eq("to_media->>videoId", toVideo)
-      .maybeSingle();
+    const pairRows = await query<{ id: string }>(
+      `select id from transition_pairs
+       where from_media->>'provider' = 'youtube'
+         and from_media->>'videoId' = $1
+         and to_media->>'provider' = 'youtube'
+         and to_media->>'videoId' = $2`,
+      [fromVideo, toVideo],
+    );
+    const pair = pairRows[0];
 
     if (pair?.id) {
-      const { data: rows } = await supabase
-        .from("transition_proposals")
-        .select(
-          "id,pair_id,proposed_by,end_prev_sec,start_next_sec,preset_id,prev_bpm,params,note,created_at",
-        )
-        .eq("pair_id", pair.id)
-        .order("created_at", { ascending: true });
+      const pRows = await query<ProposalWithVotes>(
+        `select id, pair_id, proposed_by,
+                end_prev_sec::float8 as end_prev_sec,
+                start_next_sec::float8 as start_next_sec,
+                preset_id,
+                prev_bpm::float8 as prev_bpm,
+                params, note,
+                created_at::text as created_at
+         from transition_proposals
+         where pair_id = $1
+         order by created_at asc`,
+        [pair.id],
+      );
 
-      const pRows = (rows ?? []) as ProposalWithVotes[];
       if (pRows.length > 0) {
-        const { data: votes } = await supabase
-          .from("transition_votes")
-          .select("proposal_id,user_id")
-          .in(
-            "proposal_id",
-            pRows.map((r) => r.id),
-          );
+        const votes = await query<{ proposal_id: string; user_id: string }>(
+          `select proposal_id, user_id from transition_votes where proposal_id = any($1::uuid[])`,
+          [pRows.map((r) => r.id)],
+        );
         const grouped = new Map<string, number>();
-        for (const vote of votes ?? []) {
-          const current = grouped.get(vote.proposal_id as string) ?? 0;
-          grouped.set(vote.proposal_id as string, current + 1);
+        for (const vote of votes) {
+          const current = grouped.get(vote.proposal_id) ?? 0;
+          grouped.set(vote.proposal_id, current + 1);
         }
         proposals = pRows
           .map((row) => ({

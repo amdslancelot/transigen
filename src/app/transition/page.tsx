@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
+import { query } from "@/lib/db";
 import { fetchSavedTransitionPairsPage } from "@/lib/savedTransitionPairs";
-import { getSupabaseServerClient } from "@/lib/supabase/server";
 import type { MediaRef } from "@/types/media";
 
 const PAGE_SIZE = 20;
@@ -40,8 +40,7 @@ export default async function TransitionIndexPage(props: { searchParams: SearchP
   const pageRaw = pickParam(sp.page);
   const page = Math.max(1, Math.min(10_000, parseInt(pageRaw || "1", 10) || 1));
 
-  const supabase = await getSupabaseServerClient();
-  const { rows, total } = await fetchSavedTransitionPairsPage(supabase, { page, pageSize: PAGE_SIZE, q });
+  const { rows, total } = await fetchSavedTransitionPairsPage({ page, pageSize: PAGE_SIZE, q });
 
   const videoIds = new Set<string>();
   for (const r of rows) {
@@ -52,16 +51,14 @@ export default async function TransitionIndexPage(props: { searchParams: SearchP
   }
   const labels = new Map<string, { title: string; channelTitle: string }>();
   if (videoIds.size > 0) {
-    const { data: cacheRows } = await supabase
-      .from("youtube_video_cache")
-      .select("video_id,title,channel_title")
-      .in("video_id", [...videoIds]);
-    for (const row of cacheRows ?? []) {
-      const id = String(row.video_id ?? "");
-      if (!id) continue;
-      labels.set(id, {
-        title: (row.title as string) ?? "",
-        channelTitle: (row.channel_title as string) ?? "",
+    const cacheRows = await query<{ video_id: string; title: string | null; channel_title: string | null }>(
+      `select video_id, title, channel_title from youtube_video_cache where video_id = any($1::text[])`,
+      [[...videoIds]],
+    );
+    for (const row of cacheRows) {
+      labels.set(row.video_id, {
+        title: row.title ?? "",
+        channelTitle: row.channel_title ?? "",
       });
     }
   }
