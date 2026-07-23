@@ -35,3 +35,6 @@ terraform.tfvars
 # Deploy secrets and generated kubeconfig (deploy/)
 deploy/.env.production
 deploy/kubeconfig
+
+# One-time Supabase data dump (contains user data; restore artifact, not source)
+data.sql

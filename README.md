@@ -2,7 +2,7 @@
 
 DJ transition app. Paste YouTube links to build a setlist, play in a room with dual-deck beat-synced transitions.
 
-Built with Next.js 15 + React 19 + Supabase (DB/Auth). Playback via YouTube IFrame API. Beat analysis via a separate Python worker.
+Built with Next.js 15 + React 19 + PostgreSQL (raw SQL via `pg`) + Auth.js (Google OAuth). Playback via YouTube IFrame API. Beat analysis via a separate Python worker. Live ingest status via Server-Sent Events backed by Postgres LISTEN/NOTIFY.
 
 ---
 
@@ -14,56 +14,79 @@ Built with Next.js 15 + React 19 + Supabase (DB/Auth). Playback via YouTube IFra
 npm install
 ```
 
-### 2. Configure environment variables
+### 2. Start PostgreSQL
 
-Create `.env.local` in the project root:
+Dev has no standalone database: it shares the minikube-hosted Postgres in the
+`data` namespace that staging also uses (one shared server per cluster, one
+database + one least-privilege `transigen_rw` role per app — the superuser is
+for provisioning only, never an app credential).
 
 ```sh
-NEXT_PUBLIC_SUPABASE_URL=       # Supabase project URL (Settings → API)
-NEXT_PUBLIC_SUPABASE_ANON_KEY=  # Publishable key (Settings → API)
-SUPABASE_SERVICE_ROLE_KEY=      # Secret key (Settings → API) — never expose to browser
-NEXT_PUBLIC_AUTH_FLOW=dev_email_only  # see Auth flow section below
+minikube start --driver=vfkit                          # if not already running
+deploy/stage.sh                                        # brings up the data plane + provisions transigen
+kubectl -n data port-forward svc/postgres 54321:5432 & # dev tunnel; keep it running
+```
+
+If the shared Postgres is already up (e.g. another app deployed it), only the
+port-forward is needed. Any other PostgreSQL 15+ works too — just point
+`DATABASE_URL` at it.
+
+### 3. Configure environment variables
+
+Create `.env.local` in the project root (see `.env.example` for the full annotated list):
+
+```sh
+DATABASE_URL=postgresql://transigen_rw:transigen@localhost:54321/transigen
+AUTH_SECRET=          # generate with: openssl rand -base64 32
+AUTH_GOOGLE_ID=       # Google OAuth client, see step 4
+AUTH_GOOGLE_SECRET=
 ```
 
 Optional:
 
 ```sh
-YOUTUBE_API_KEY=                # Google Cloud → YouTube Data API v3 → Credentials
+YOUTUBE_API_KEY=      # Google Cloud → YouTube Data API v3 → Credentials
 ```
 
-### 3. Apply database migrations
+### 4. Create a Google OAuth client
 
-In Supabase SQL Editor (or via `supabase db push`), run all files in order:
+In [Google Cloud Console → APIs & Services → Credentials](https://console.cloud.google.com/apis/credentials), create an **OAuth client ID** of type **Web application** with:
 
-```
-supabase/migrations/0001_init.sql
-supabase/migrations/0002_transition_presets_params.sql
-supabase/migrations/0003_metadata_caches.sql
-supabase/migrations/0004_rename_fade_preset.sql
-supabase/migrations/0004_room_play_count_directory.sql
-supabase/migrations/0005_echo_preset_cadence.sql
-supabase/migrations/0006_subsecond_proposal_times.sql
-supabase/migrations/0007_track_analysis.sql
-```
+- Authorized JavaScript origin: `http://localhost:3000`
+- Authorized redirect URI: `http://localhost:3000/api/auth/callback/google`
 
-### 4. Configure Supabase Auth redirect URLs
+Copy the client ID and secret into `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`.
 
-In Supabase dashboard → Authentication → URL Configuration → Redirect URLs, add:
+### 5. Apply database migrations
 
-```
-http://localhost:3000
-http://localhost:3000/auth/callback
+```sh
+npm run migrate
 ```
 
-Set Site URL to `http://localhost:3000` for local dev.
+Applies every file in `db/migrations/` in order, tracked in a `schema_migrations` table; re-running is a no-op. Note: if you ever reset the database, sign out and back in — sessions reference user rows by id.
 
-### 5. Start the app
+### 6. Start the app
 
 ```sh
 npm run dev
 ```
 
-Open `http://localhost:3000`.
+Open `http://localhost:3000` and sign in with Google.
+
+---
+
+## Migrating data from a Supabase project
+
+The schema in `db/migrations/0001_init.sql` matches the final Supabase-era schema, with one exception: `auth.users` is replaced by a `public.users` table keyed by Google account. To carry data over:
+
+```sh
+pg_dump --data-only --column-inserts \
+  --table 'public.transition_*' --table 'public.room*' --table 'public.youtube_*' \
+  --table 'public.spotify_track_cache' --table 'public.ingest_jobs' --table 'public.track_analysis' \
+  "$SUPABASE_DB_URL" > data.sql
+```
+
+User-owned rows (`created_by`, `proposed_by`, `owner_id`, `user_id` columns) reference old Supabase auth user ids that will not exist in the new `users` table — you must first insert matching rows into `users` (or remap those columns to your new Google-provisioned user id) before restoring, or the foreign keys will reject the rows. Cache tables (`youtube_video_cache`, `spotify_track_cache`, `youtube_spotify_link`, `track_analysis`) have no user references and restore cleanly.
 
 ---
 
@@ -87,11 +110,10 @@ CMAKE_PREFIX_PATH="/usr/local/opt/llvm" LLVM_CONFIG="/usr/local/opt/llvm/bin/llv
 
 ### Configure
 
-Create `worker/.env` with the same Supabase project credentials:
+Create `worker/.env`:
 
 ```sh
-SUPABASE_URL=              # same as NEXT_PUBLIC_SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY= # Secret key — same as in .env.local
+DATABASE_URL=postgresql://transigen_rw:transigen@localhost:54321/transigen
 ```
 
 ### Run
@@ -108,19 +130,15 @@ podman build -t transigen-worker .
 podman run --env-file .env transigen-worker
 ```
 
-The worker polls `ingest_jobs` every 5 seconds. When a room loads, the app queues all songs automatically. The room UI shows "分析中 x/y 首" until analysis completes. Analyzed BPM and beat offset are cached permanently — each song is only downloaded once across all rooms.
+(When running the worker in a container against the port-forwarded Postgres on the same machine, replace `localhost` in `DATABASE_URL` with the host address the container can reach, e.g. `host.containers.internal`.)
+
+The worker polls `ingest_jobs` every 5 seconds. When a room loads, the app queues all songs automatically. The room UI shows "分析中 x/y 首" until analysis completes — updates arrive live over SSE (a Postgres trigger NOTIFYs on every `ingest_jobs` change). Analyzed BPM and beat offset are cached permanently — each song is only downloaded once across all rooms.
 
 ---
 
-## Auth flow
+## Auth
 
-Set `NEXT_PUBLIC_AUTH_FLOW` in `.env.local` and restart `npm run dev`.
-
-| Value | Behavior |
-|---|---|
-| `magic_link` | Email magic link (default) |
-| `email_password` | Sign up + sign in with email and password |
-| `dev_email_only` | Email only, no email sent. Requires `AUTH_DEV_EMAIL_BYPASS=1`, `SUPABASE_SERVICE_ROLE_KEY` (Secret key), and `AUTH_DEV_SHARED_PASSWORD`. **Local/dev only.** |
+Sign-in is Google OAuth only (Auth.js v5, JWT session cookies). Users are provisioned automatically on first sign-in into the `users` table, keyed by the stable Google subject id. There are no magic-link, password, or dev-bypass flows.
 
 ---
 
@@ -133,32 +151,40 @@ Set `NEXT_PUBLIC_AUTH_FLOW` in `.env.local` and restart `npm run dev`.
 
 ---
 
-## Deploy (OCI)
+## Deploy
 
-The web app deploys to Oracle Cloud Infrastructure (OKE) with Terraform-provisioned infrastructure and a pull-based, in-cluster CD pipeline — no GitHub Actions or other external CI system involved. Full design and known risks: `docs/design/deploy-oci-cicd-plan.md`.
+Transigen uses the same stage/prod deploy setup as gelp: a **staging** deploy
+onto a local minikube cluster, and a **prod** deploy onto the shared OCI k3s
+server that gelp bootstrapped (transigen runs there as one app among several,
+with its own namespace, hostname, and database in the shared Postgres). The
+full runbook lives in `deploy/README.md`.
 
-The worker intentionally stays local (see the Worker setup section above, including the Podman instructions) — it is not part of the deployed surface, because running yt-dlp from a datacenter IP risks YouTube bot-detection failures that do not occur from a residential machine.
+Migrations run automatically: the app applies `db/migrations/` lazily on its
+first database use in each process, so deploys have no separate migrate step.
 
-### Prerequisites
+The worker intentionally stays local (see the Worker setup section above) — it
+is not part of the deployed surface, because running yt-dlp from a datacenter
+IP risks YouTube bot-detection failures that do not occur from a residential
+machine.
 
-- An OCI account with a compartment to deploy into.
-- OCI CLI installed and configured (`oci setup config`) so that `oci iam region list` succeeds.
-- [Terraform](https://developer.hashicorp.com/terraform/install) and `kubectl` on `PATH`.
-
-### One-time setup
-
-```sh
-cp deploy/.env.production.example deploy/.env.production
-```
-
-Fill in `deploy/.env.production` with your Supabase credentials, YouTube API key, OCIR push credential, and OCI tenancy/compartment/region — see the comments in the file for where each value comes from. The region is the full identifier only (e.g. `us-ashburn-1`); the short OCIR region key (e.g. `iad`) is derived automatically by Terraform, so you never need to look it up. Then run:
+### Staging (local minikube)
 
 ```sh
-./deploy/bootstrap.sh
+minikube start --driver=vfkit          # one-time (shared with gelp staging)
+deploy/stage.sh                        # each deploy
+kubectl -n transigen-staging port-forward svc/transigen 3000:80
 ```
 
-This provisions the VCN, OKE cluster, and node pool with Terraform, generates a kubeconfig, creates the Kubernetes secrets and ConfigMaps, applies the `k8s/` manifests, and triggers the first build. It prints the load balancer's public IP when done — add `http://<that-ip>` to Supabase Auth → URL Configuration → Redirect URLs so magic-link sign-in works. The script is idempotent and safe to re-run.
+### Prod (shared k3s server)
 
-### Upgrades
+One-time, as root on the server (see `deploy/README.md` for the full list of
+values and follow-up steps — DNS, GitHub webhook, Google OAuth redirect URI):
 
-Just `git push` to `main`. A CronJob running inside the cluster polls the GitHub API every 3 minutes, and when it sees a new commit it builds the image in-cluster (via kaniko) and rolls out the update automatically. No local step, no CI minutes, no manual redeploy.
+```sh
+TRANSIGEN_HOST=<hostname> WEBHOOK_SECRET=<secret> TRANSIGEN_DB_PASSWORD=<pw> \
+bash deploy/setup-app.sh
+```
+
+Afterwards every `git push` to `main` triggers the server's webhook, which
+rebuilds the image on the box and rolls the deployment — no CI system, no
+registry.
