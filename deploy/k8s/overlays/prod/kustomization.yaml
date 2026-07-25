@@ -1,13 +1,11 @@
-# Prod overlay: the shared k3s box on OCI, namespace transigen, HTTPS via
-# cert-manager + Let's Encrypt over Traefik.
+# Prod overlay: the shared k3s box on OCI, namespace transigen. TLS is NOT
+# this overlay's concern — the platform repo's wildcard cert (*.lans-h.cc) is
+# Traefik's default certificate for the whole node, so any Ingress with no
+# tls block of its own picks it up automatically. No per-app ClusterIssuer.
 #
 # The transigen-env Secret is NOT committed here — deploy/deploy.sh applies it
 # from a server-local file (see deploy/README.md); the database is the shared
-# Postgres in the `data` namespace, whose manifests are owned by the
-# snoopy_home checkout on the server (its docs/prod-k3s-runbook.md). The
-# letsencrypt-prod ClusterIssuer is owned by the gelp deployment —
-# this overlay only references it by name. ${TRANSIGEN_HOST} is filled by
-# envsubst in deploy.sh after `kubectl kustomize` renders this overlay.
+# Postgres in the `data` namespace, owned by the platform repo.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
@@ -21,8 +19,8 @@ images:
   - name: transigen
     newTag: latest
 
-# Add TLS + the cert-manager annotation and set the real host on the base
-# ingress (which ships plain HTTP for staging).
+# Set the real host on the base ingress (which ships a placeholder host for
+# staging).
 patches:
   - target:
       kind: Ingress
@@ -30,14 +28,4 @@ patches:
     patch: |-
       - op: replace
         path: /spec/rules/0/host
-        value: ${TRANSIGEN_HOST}
-      - op: add
-        path: /metadata/annotations
-        value:
-          cert-manager.io/cluster-issuer: letsencrypt-prod
-      - op: add
-        path: /spec/tls
-        value:
-          - hosts:
-              - ${TRANSIGEN_HOST}
-            secretName: transigen-tls
+        value: transigen.lans-h.cc

@@ -5,11 +5,10 @@
 # listener (on every push to main) and by hand on the server for a manual
 # redeploy.
 #
-# The shared infrastructure is owned by other checkouts on the server: the k3s
-# cluster, Traefik, cert-manager, and the letsencrypt-prod ClusterIssuer by
-# gelp (/opt/gelp, its setup-server.sh), and the Postgres data plane in
-# namespace `data` by snoopy_home (its docs/prod-k3s-runbook.md). This script
-# only verifies those exist; it deploys the transigen app on top.
+# Shared infrastructure (k3s, Traefik, cert-manager + wildcard TLS, the
+# Postgres data plane in namespace `data`, the webhook listener) is owned by
+# the platform repo. This script only verifies Postgres exists; it deploys
+# the transigen app on top.
 #
 # Usage: deploy/deploy.sh   (no arguments)
 
@@ -18,29 +17,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-# /opt/transigen/deploy.env is written by deploy/setup-app.sh on the server
-# and supplies TRANSIGEN_HOST and KUBECONFIG. It won't exist when this script
-# is run outside that server, so tolerate its absence rather than failing.
-# set -a exports everything the file defines: envsubst and kubectl run as
-# child processes and only see exported variables — a plain `source` would
-# leave ${TRANSIGEN_HOST} rendering as an empty string on every
-# webhook-triggered deploy.
-if [ -f /opt/transigen/deploy.env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source /opt/transigen/deploy.env
-  set +a
-fi
+# kubectl needs no setup here: the webhook listener runs as root, and the
+# platform repo's node bootstrap symlinks /root/.kube/config to the k3s
+# kubeconfig (bootstrap/bootstrap-node.sh).
 
 cd "${REPO_ROOT}"
 
 echo "==> Deploying Transigen from ${REPO_ROOT}"
-
-# Fail on missing configuration before spending minutes on an image build.
-if [ -z "${TRANSIGEN_HOST:-}" ]; then
-  echo "ERROR: TRANSIGEN_HOST is not set (expected from /opt/transigen/deploy.env)." >&2
-  exit 1
-fi
 
 # ---------------------------------------------------------------------------
 # 1. Pull the latest code, but only when this checkout is actually a git repo
@@ -54,21 +37,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Verify the shared infrastructure this app depends on.
+# 2. Preflight: the shared Postgres (namespace 'data') must already exist. It
+#    is deployed and owned by the platform repo, not by transigen — transigen
+#    only connects to it as transigen_rw.
 # ---------------------------------------------------------------------------
 if ! kubectl get deployment postgres -n data >/dev/null 2>&1; then
   echo "ERROR: the shared Postgres (deployment/postgres in namespace 'data') is missing." >&2
-  echo "It is owned by the snoopy_home checkout on this server — see" >&2
-  echo "snoopy_home/docs/prod-k3s-runbook.md." >&2
+  echo "It is owned by the platform repo — see cluster/data-postgres/." >&2
   exit 1
 fi
 echo "==> Waiting for the shared Postgres to be ready"
 kubectl rollout status deployment/postgres -n data --timeout=180s
-
-if ! kubectl get clusterissuer letsencrypt-prod >/dev/null 2>&1; then
-  echo "WARNING: ClusterIssuer letsencrypt-prod not found (owned by the gelp deployment)."
-  echo "TLS certificates will not be issued until it exists. Continuing."
-fi
 
 # ---------------------------------------------------------------------------
 # 3. Build the image and import it directly into k3s's containerd, since
@@ -102,12 +81,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Apply the prod Kustomize overlay. The rendered manifests contain
-#    ${TRANSIGEN_HOST} placeholders (in the Ingress) that need shell
-#    substitution before they're valid for kubectl. Secrets are NOT part of
-#    the overlay: real values live only in the gitignored deploy/env.prod
-#    (written by setup-app.sh) and the transigen-env Secret is created from
-#    it here — no Secret YAML anywhere.
+# 4. Apply the prod Kustomize overlay. The host is baked into the overlay
+#    (transigen.lans-h.cc) — no placeholder substitution needed. Secrets are
+#    NOT part of the overlay: real values live only in the gitignored
+#    deploy/env.prod and the transigen-env Secret is created from it here —
+#    no Secret YAML anywhere.
 # ---------------------------------------------------------------------------
 PROD_OVERLAY="${SCRIPT_DIR}/k8s/overlays/prod"
 echo "==> Applying prod overlay from ${PROD_OVERLAY}"
@@ -118,9 +96,8 @@ kubectl apply -f "${PROD_OVERLAY}/namespace.yaml"
 ENV_FILE="${SCRIPT_DIR}/env.prod"
 if [ -f "${ENV_FILE}" ]; then
   echo "==> Creating/refreshing the transigen-env Secret from deploy/env.prod"
-  # shellcheck disable=SC2016  # envsubst takes the ${VAR} names literally
   kubectl -n transigen create secret generic transigen-env \
-    --from-env-file=<(envsubst '${TRANSIGEN_HOST}' < "${ENV_FILE}") \
+    --from-env-file="${ENV_FILE}" \
     --dry-run=client -o yaml | kubectl apply -f -
 elif kubectl get secret transigen-env -n transigen >/dev/null 2>&1; then
   echo "==> deploy/env.prod not found; existing transigen-env Secret left as-is"
@@ -135,10 +112,7 @@ else
   echo "##############################################################"
 fi
 
-# shellcheck disable=SC2016  # envsubst takes the ${VAR} names literally
-kubectl kustomize "${PROD_OVERLAY}" \
-  | envsubst '${TRANSIGEN_HOST}' \
-  | kubectl apply -f -
+kubectl kustomize "${PROD_OVERLAY}" | kubectl apply -f -
 
 # ---------------------------------------------------------------------------
 # 5. Roll out the new image and wait for it to become healthy.
