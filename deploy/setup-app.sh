@@ -1,51 +1,55 @@
 #!/usr/bin/env bash
 #
-# One-time setup that adds Transigen to an EXISTING gelp-style k3s server
-# (the box bootstrapped by gelp's deploy/setup-server.sh, which already runs
-# k3s, Traefik, cert-manager, and the adnanh/webhook service; the shared
-# Postgres data plane in namespace `data` is owned by the snoopy_home repo,
-# see its docs/prod-k3s-runbook.md). Idempotent: safe to re-run.
+# One-time onboarding of Transigen onto the shared platform k3s node.
 #
-# Run as root on the server:
+# The node itself — k3s/Traefik/podman, the adnanh/webhook listener + the
+# deploy-transigen hook, cert-manager and the *.lans-h.cc wildcard TLS cert, and
+# the shared Postgres data plane in namespace `data` — is owned and provisioned
+# by the `platform` repo, not by this script anymore. This only puts *this app*
+# on a node the platform has already prepared: clone to /opt/transigen, write the
+# app config, and run the first deploy. See the platform repo for the pieces this
+# no longer does:
 #
-#   TRANSIGEN_HOST=transigen.example.com \
-#   WEBHOOK_SECRET=<github webhook secret for this repo> \
-#   TRANSIGEN_DB_PASSWORD=<openssl rand -hex 24> \
+#   - node bootstrap (k3s + Traefik + podman) ...... platform bootstrap/bootstrap-node.sh
+#   - webhook listener + deploy-transigen hook ..... platform webhook/hooks.json + bootstrap/install-webhook.sh
+#   - wildcard *.lans-h.cc TLS (Traefik default) ... platform cluster/cert-manager/ (Gate 4)
+#   - transigen DB/role on shared Postgres ......... platform cluster/data-postgres/provision-db.sh (PROVISION_APPS="transigen")
+#
+# (deploy/provision-db.sh is KEPT in this repo for the local minikube *staging*
+# data plane — stage.sh still pipes it into the staging postgres pod; only the
+# *prod* DB provisioning moved to platform.) Idempotent: safe to re-run.
+#
+# Run as root on the node:
+#
+#   TRANSIGEN_HOST=transigen.lans-h.cc \
+#   TRANSIGEN_DB_PASSWORD=<the password platform's provision-db.sh set> \
 #   bash setup-app.sh
 #
 # Optional: REPO_URL (defaults to the GitHub transigen repo).
 #
 # What it does:
 #   1. Clones/updates the repo at /opt/transigen and writes /opt/transigen/deploy.env.
-#   2. Provisions the `transigen` database/role in the shared Postgres
-#      (deploy/provision-db.sh piped into the postgres pod). There is no
-#      automatic re-provisioning: if the Postgres volume is ever
-#      re-initialised, re-run this script and restore from backup.
-#   3. Creates the gitignored deploy/.env.prod from .env.prod.example with the
+#   2. Creates the gitignored deploy/.env.prod from .env.prod.example with the
 #      DB password and a generated AUTH_SECRET filled in (Google OAuth values
 #      stay placeholders — fill them in before sign-in will work). deploy.sh
 #      creates the transigen-env Secret from this file on every deploy.
-#   4. Adds the deploy-transigen hook to /etc/webhook/hooks.json and restarts
-#      the webhook service.
-#   5. Runs the first deploy.
+#   3. Runs the first deploy.
 
 set -euo pipefail
 
 log() { echo "[setup-app] $*"; }
 die() { echo "[setup-app] ERROR: $*" >&2; exit 1; }
 
-[ "$(id -u)" -eq 0 ] || die "run as root (the deploy needs k3s ctr and /etc/webhook access)."
+[ "$(id -u)" -eq 0 ] || die "run as root (the deploy needs k3s ctr access)."
 
-: "${TRANSIGEN_HOST:?set TRANSIGEN_HOST (public hostname for the app)}"
-: "${WEBHOOK_SECRET:?set WEBHOOK_SECRET (GitHub webhook HMAC secret for this repo)}"
-: "${TRANSIGEN_DB_PASSWORD:?set TRANSIGEN_DB_PASSWORD (URL-safe, e.g. openssl rand -hex 24)}"
+: "${TRANSIGEN_HOST:?set TRANSIGEN_HOST (public hostname for the app, e.g. transigen.lans-h.cc)}"
+: "${TRANSIGEN_DB_PASSWORD:?set TRANSIGEN_DB_PASSWORD (must match what platform's provision-db.sh set for transigen_rw)}"
 REPO_URL="${REPO_URL:-https://github.com/amdslancelot/transigen.git}"
 
 APP_DIR=/opt/transigen
 export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
-command -v kubectl >/dev/null 2>&1 || die "kubectl not found — is this the gelp k3s server?"
-command -v jq >/dev/null 2>&1 || die "jq not found (gelp's setup-server.sh installs it)."
+command -v kubectl >/dev/null 2>&1 || die "kubectl not found — is this the platform k3s node?"
 
 # --- 1. Repo checkout + deploy.env -----------------------------------------
 
@@ -65,23 +69,10 @@ KUBECONFIG=${KUBECONFIG}
 EOF
 chmod 600 "${APP_DIR}/deploy.env"
 
-# --- 2. Database provisioning in the shared Postgres ------------------------
-
-log "Waiting for the shared Postgres (namespace data)"
-kubectl get deployment postgres -n data >/dev/null 2>&1 \
-  || die "deployment/postgres not found in namespace data — it is owned by the snoopy_home repo (docs/prod-k3s-runbook.md)."
-kubectl rollout status deployment/postgres -n data --timeout=180s
-
-log "Provisioning database 'transigen' / role 'transigen_rw' (idempotent)"
-kubectl -n data exec -i deploy/postgres -- \
-  env PROVISION_APPS="transigen" TRANSIGEN_DB_PASSWORD="${TRANSIGEN_DB_PASSWORD}" \
-  bash -s < "${APP_DIR}/deploy/provision-db.sh"
-
-log "NOTE: the shared Postgres has no automatic re-provisioning. If its data"
-log "volume is ever re-initialised, re-run this script (idempotent) and restore"
-log "the transigen database from backup."
-
-# --- 3. App secrets ----------------------------------------------------------
+# --- 2. App secrets ----------------------------------------------------------
+# Prod DB provisioning is the platform repo's job (see the header); this only
+# writes the app config whose DATABASE_URL must carry the password platform's
+# provision-db.sh set for transigen_rw.
 
 ENV_FILE="${APP_DIR}/deploy/.env.prod"
 if [ -f "${ENV_FILE}" ]; then
@@ -97,42 +88,22 @@ else
   log "Fill them in (Google Cloud Console OAuth client) or sign-in will not work."
 fi
 
-# --- 4. Webhook hook ----------------------------------------------------------
-
-HOOKS_FILE=/etc/webhook/hooks.json
-if [ ! -f "${HOOKS_FILE}" ]; then
-  die "${HOOKS_FILE} not found — the webhook service is set up by gelp's setup-server.sh."
-fi
-
-if jq -e '.[] | select(.id == "deploy-transigen")' "${HOOKS_FILE}" >/dev/null; then
-  log "deploy-transigen hook already present in ${HOOKS_FILE}"
-else
-  log "Adding deploy-transigen hook to ${HOOKS_FILE}"
-  # One jq invocation reading the secret from the environment (env.WEBHOOK_SECRET),
-  # so the secret never appears in any process argument list, and no sed can
-  # corrupt the JSON when the secret contains characters like | & or quotes.
-  export WEBHOOK_SECRET
-  jq -n \
-    --slurpfile existing "${HOOKS_FILE}" \
-    --slurpfile tmpl "${APP_DIR}/deploy/webhook/hooks.json" \
-    '$existing[0] + [$tmpl[0][0] | walk(if . == "{{WEBHOOK_SECRET}}" then env.WEBHOOK_SECRET else . end)]' \
-    > "${HOOKS_FILE}.tmp" \
-    && mv "${HOOKS_FILE}.tmp" "${HOOKS_FILE}"
-  systemctl restart webhook
-fi
-
-# --- 5. First deploy ----------------------------------------------------------
+# --- 3. First deploy ----------------------------------------------------------
 
 log "Running the first deploy"
 bash "${APP_DIR}/deploy/deploy.sh"
 
 log ""
-log "Setup complete. Remaining manual steps:"
-log "  1. Point a DNS A record for ${TRANSIGEN_HOST} at this server's public IP"
-log "     (cert-manager will then issue the TLS certificate automatically)."
-log "  2. Add a GitHub webhook on the transigen repo:"
-log "     URL http://<server-ip>:9000/hooks/deploy-transigen, content type json,"
-log "     secret = the WEBHOOK_SECRET you used, push events only."
-log "  3. In the Google OAuth client, add https://${TRANSIGEN_HOST}/api/auth/callback/google"
+log "Setup complete. Remaining steps (mostly in the platform repo):"
+log "  1. DB: ensure transigen's DB/role exists on the shared Postgres —"
+log "     platform cluster/data-postgres/provision-db.sh (PROVISION_APPS=\"transigen\")."
+log "     Its transigen_rw password must match the TRANSIGEN_DB_PASSWORD above."
+log "  2. Webhook: the deploy-transigen hook is defined in platform webhook/hooks.json"
+log "     and rendered onto the node by its bootstrap/install-webhook.sh. Point the"
+log "     GitHub webhook at http://deploy.lans-h.cc:9000/hooks/deploy-transigen"
+log "     (push events, the TRANSIGEN_WEBHOOK_SECRET used there)."
+log "  3. DNS resolves via the *.lans-h.cc wildcard and TLS is the platform's"
+log "     wildcard cert (Traefik default) — no per-app DNS record or cert needed."
+log "  4. In the Google OAuth client, add https://${TRANSIGEN_HOST}/api/auth/callback/google"
 log "     as an authorized redirect URI, and fill AUTH_GOOGLE_* in ${ENV_FILE},"
 log "     then re-run ${APP_DIR}/deploy/deploy.sh."

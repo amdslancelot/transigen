@@ -1,10 +1,11 @@
 # Transigen deployment
 
 This directory mirrors gelp's deploy setup (the same stage/prod pattern; see
-`/opt/gelp` on the server or the gelp repo's `deploy/`): a container image
+`/opt/gelp` on the node or the gelp repo's `deploy/`): a container image
 built locally with no registry, Kustomize base + `staging`/`prod` overlays,
 a manual minikube staging deploy, and a webhook-driven prod deploy onto the
-shared OCI k3s server that gelp bootstrapped.
+shared k3s node the **`platform`** repo bootstraps and owns (k3s/Traefik, the
+webhook listener, the `*.lans-h.cc` wildcard TLS cert, and the shared Postgres).
 
 Data lives in the **shared PostgreSQL** server in the `data` namespace: every
 app on the node gets its own database and least-privilege role. The data plane
@@ -33,13 +34,16 @@ See the root `README.md` setup section.
   (plain HTTP). Probes hit `/api/health`.
 - `provision-db.sh` — idempotent per-app database/role provisioning (with
   `REVOKE CONNECT` isolation hardening), piped into the shared postgres pod
-  over `kubectl exec`. The data-plane manifests themselves live in the
-  snoopy_home repo, not here.
+  over `kubectl exec`. Used by `stage.sh` for the local **minikube staging**
+  data plane; **prod** DB provisioning is the platform repo's job
+  (`cluster/data-postgres/provision-db.sh`, `PROVISION_APPS="transigen"`). The
+  data-plane manifests themselves live in the snoopy_home repo, not here.
 - `k8s/overlays/staging/` — minikube, namespace `transigen-staging`, image tag
   `staging`, host `transigen.staging.localhost`.
-- `k8s/overlays/prod/` — shared k3s server, namespace `transigen`, image tag
-  `latest`, host `${TRANSIGEN_HOST}` with TLS via the existing
-  `letsencrypt-prod` ClusterIssuer.
+- `k8s/overlays/prod/` — shared k3s node, namespace `transigen`, image tag
+  `latest`, host `${TRANSIGEN_HOST}`. TLS is the platform's `*.lans-h.cc`
+  wildcard cert (Traefik's default certificate) — no per-app ClusterIssuer or
+  `tls` block.
 - `.env.staging.example` / `.env.prod.example` — committed templates for the
   `transigen-env` Secret, following snoopy_home's password policy: **no real
   secrets are committed.** Copy each to its gitignored sibling and fill in real
@@ -49,12 +53,12 @@ See the root `README.md` setup section.
   the env file at deploy time — no Secret YAML anywhere.
 - `stage.sh` — build with podman → load into minikube → verify the shared
   data plane + provision the transigen DB → apply the staging overlay.
-- `deploy.sh` — prod build-and-deploy on the server; run by the webhook on
-  every push to `main`, and safe to run by hand.
-- `setup-app.sh` — one-time root script that adds transigen to the existing
-  gelp server (checkout, DB provisioning, secrets, webhook hook, first deploy).
-- `webhook/hooks.json` — the `deploy-transigen` hook entry merged into the
-  server's `/etc/webhook/hooks.json` by `setup-app.sh`.
+- `deploy.sh` — prod build-and-deploy on the node; run by the platform's shared
+  webhook listener on every push to `main`, and safe to run by hand.
+- `setup-app.sh` — one-time onboarding of transigen onto a node the **platform**
+  repo has already bootstrapped (checkout, app config, first deploy). Node
+  bootstrap, the webhook listener + `deploy-transigen` hook, wildcard TLS, and
+  prod DB provisioning are the platform repo's, not here.
 
 ## Staging (local minikube)
 
@@ -81,22 +85,28 @@ real OAuth client in `deploy/.env.staging` — copy it from
 `.env.staging.example`; it is gitignored, so the client secret is never
 committed (see its comments).
 
-## Prod (shared k3s server)
+## Prod (shared platform k3s node)
 
-One-time, as root on the server gelp already runs on:
+Prod runs on the shared fleet node owned by the **`platform`** repo. Provision
+transigen's DB/role first (platform `cluster/data-postgres/provision-db.sh` with
+`PROVISION_APPS="transigen"`; keep the password), then onboard the app, one-time
+as root on the node:
 
 ```sh
-TRANSIGEN_HOST=<public hostname> \
-WEBHOOK_SECRET=<openssl rand -hex 32> \
-TRANSIGEN_DB_PASSWORD=<openssl rand -hex 24> \
+TRANSIGEN_HOST=transigen.lans-h.cc \
+TRANSIGEN_DB_PASSWORD=<the transigen_rw password provisioning set> \
 bash deploy/setup-app.sh
 ```
 
-Then: point DNS at the server, add the GitHub webhook
-(`http://<server-ip>:9000/hooks/deploy-transigen`, push events, the same
-secret), and fill the `AUTH_GOOGLE_*` values in the server-local gitignored
-`deploy/.env.prod`, then re-run `deploy/deploy.sh`. Every push to `main`
-afterwards rebuilds the image on the server and rolls the deployment.
+Then: fill the `AUTH_GOOGLE_*` values in the node-local gitignored
+`deploy/.env.prod` and re-run `deploy/deploy.sh`. The `deploy-transigen` hook is
+defined in the platform repo's `webhook/hooks.json` (rendered onto the node by
+its `bootstrap/install-webhook.sh`); point the GitHub webhook at
+`http://deploy.lans-h.cc:9000/hooks/deploy-transigen` (push events, the
+`TRANSIGEN_WEBHOOK_SECRET` used there). DNS resolves via the `*.lans-h.cc`
+wildcard and TLS is the platform wildcard cert — no per-app record or cert.
+Every push to `main` afterwards rebuilds the image on the node and rolls the
+deployment.
 
 Known gaps inherited from the gelp pattern, unchanged: no automated rollback
 (use `kubectl rollout undo` by hand) and no deploy lock around concurrent

@@ -156,10 +156,10 @@ Sign-in is Google OAuth only (Auth.js v5, JWT session cookies). Users are provis
 ## Deploy
 
 Transigen uses the same stage/prod deploy setup as gelp: a **staging** deploy
-onto a local minikube cluster, and a **prod** deploy onto the shared OCI k3s
-server that gelp bootstrapped (transigen runs there as one app among several,
-with its own namespace, hostname, and database in the shared Postgres). The
-full runbook lives in `deploy/README.md`.
+onto a local minikube cluster, and a **prod** deploy onto the shared k3s node
+the **`platform`** repo bootstraps and owns (transigen runs there as one app
+among several, with its own namespace, hostname, and database in the shared
+Postgres). The full runbook lives in `deploy/README.md`.
 
 Migrations run automatically: the app applies `db/migrations/` lazily on its
 first database use in each process, so deploys have no separate migrate step.
@@ -177,16 +177,17 @@ deploy/stage.sh                        # each deploy
 kubectl -n transigen-staging port-forward svc/transigen 3000:80
 ```
 
-### Prod (shared k3s server)
+### Prod (shared platform k3s node)
 
-One-time, as root on the server (see `deploy/README.md` for the full list of
-values and follow-up steps — DNS, GitHub webhook, Google OAuth redirect URI):
+One-time, as root on the node (see `deploy/README.md` for the full list of values
+and follow-up steps — Google OAuth redirect URI, and the platform-owned webhook +
+DB provisioning). Provision the DB in the platform repo first, then:
 
 ```sh
-TRANSIGEN_HOST=<hostname> WEBHOOK_SECRET=<secret> TRANSIGEN_DB_PASSWORD=<pw> \
+TRANSIGEN_HOST=transigen.lans-h.cc TRANSIGEN_DB_PASSWORD=<pw> \
 bash deploy/setup-app.sh
 ```
 
-Afterwards every `git push` to `main` triggers the server's webhook, which
-rebuilds the image on the box and rolls the deployment — no CI system, no
-registry.
+Afterwards every `git push` to `main` runs the repo's GitHub Actions build; on
+success it signs a call to the platform's shared webhook listener, which rebuilds
+the image on the node and rolls the deployment — no image registry.
