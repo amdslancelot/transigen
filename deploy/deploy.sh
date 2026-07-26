@@ -14,6 +14,14 @@
 
 set -euo pipefail
 
+# k3s installs its binaries (k3s, and the kubectl/ctr symlinks) into
+# /usr/local/bin. That is on the PATH for the webhook's systemd service and for
+# an interactive root login, but NOT under `sudo bash deploy.sh`: sudo resets
+# PATH to its secure_path, which excludes /usr/local/bin — so bare `k3s`/
+# `kubectl` fail with "command not found" on a manual run. Prepend it so the
+# script works identically whether the webhook or a human invokes it.
+export PATH="/usr/local/bin:${PATH}"
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
@@ -63,21 +71,23 @@ else
   exit 1
 fi
 
-echo "==> Building transigen:latest with ${CONTAINER_TOOL}"
-"${CONTAINER_TOOL}" build -f deploy/Dockerfile -t transigen:latest .
+# Build and import under an explicit localhost/ name. The prod overlay's
+# images transformer sets the pod spec to localhost/transigen:latest, and
+# containerd treats "localhost" as the registry host — so it uses the imported
+# local image directly, never normalizing a bare name to docker.io/library/
+# and never attempting a registry pull. This is also exactly the name podman
+# gives an unqualified build, so no retag is needed. --format docker-archive
+# because podman's default oci-archive output is not what `ctr images import`
+# expects.
+IMAGE="localhost/transigen:latest"
+echo "==> Building ${IMAGE} with ${CONTAINER_TOOL}"
+"${CONTAINER_TOOL}" build -f deploy/Dockerfile -t "${IMAGE}" .
 
-echo "==> Importing transigen:latest into k3s containerd"
+echo "==> Importing ${IMAGE} into k3s containerd"
 if [ "${CONTAINER_TOOL}" = "podman" ]; then
-  # Save under the fully-qualified docker.io/library/ name: podman stores
-  # unqualified tags as localhost/<name>, but the kubelet resolves the pod
-  # spec's "transigen:latest" to docker.io/library/transigen:latest — the
-  # imported name has to match or containerd's local image is ignored and a
-  # registry pull is attempted. --format docker-archive because podman's
-  # default oci-archive output is not what `ctr images import` expects.
-  podman tag transigen:latest docker.io/library/transigen:latest
-  podman save --format docker-archive docker.io/library/transigen:latest | k3s ctr images import -
+  podman save --format docker-archive "${IMAGE}" | k3s ctr images import -
 else
-  docker save transigen:latest | k3s ctr images import -
+  docker save "${IMAGE}" | k3s ctr images import -
 fi
 
 # ---------------------------------------------------------------------------
