@@ -43,7 +43,7 @@ die() { echo "[setup-app] ERROR: $*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "run as root (the deploy needs k3s ctr access)."
 
 : "${TRANSIGEN_HOST:?set TRANSIGEN_HOST (public hostname for the app, e.g. transigen.lans-h.cc)}"
-: "${TRANSIGEN_DB_PASSWORD:?set TRANSIGEN_DB_PASSWORD (must match what platform's provision-db.sh set for transigen_rw)}"
+: "${TRANSIGEN_DB_PASSWORD:?set TRANSIGEN_DB_PASSWORD (must match what the platform provision-db.sh set for transigen_rw)}"
 REPO_URL="${REPO_URL:-https://github.com/amdslancelot/transigen.git}"
 
 APP_DIR=/opt/transigen
