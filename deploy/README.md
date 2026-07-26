@@ -40,11 +40,13 @@ See the root `README.md` setup section.
 - `k8s/overlays/prod/` — shared k3s server, namespace `transigen`, image tag
   `latest`, host `${TRANSIGEN_HOST}` with TLS via the existing
   `letsencrypt-prod` ClusterIssuer.
-- `env.staging` / `.env.prod.example` — values for the `transigen-env` Secret,
-  following snoopy_home's password policy: real passwords live only in the
-  gitignored `deploy/.env.prod` on the server (dev/test values in `env.staging`
-  are committed), and the Secret is created from the env file at deploy time —
-  no Secret YAML anywhere.
+- `.env.staging.example` / `.env.prod.example` — committed templates for the
+  `transigen-env` Secret, following snoopy_home's password policy: **no real
+  secrets are committed.** Copy each to its gitignored sibling and fill in real
+  values — `deploy/.env.prod` on the server, and `deploy/.env.staging` for local
+  staging (stage.sh falls back to the committed `.env.staging.example` if you
+  don't create one, so a fresh clone still works). The Secret is created from
+  the env file at deploy time — no Secret YAML anywhere.
 - `stage.sh` — build with podman → load into minikube → verify the shared
   data plane + provision the transigen DB → apply the staging overlay.
 - `deploy.sh` — prod build-and-deploy on the server; run by the webhook on
@@ -75,7 +77,9 @@ deploy/stage.sh
 Reach the app with `kubectl -n transigen-staging port-forward svc/transigen 3000:80`
 (then <http://localhost:3000>), or via `minikube tunnel` on
 <http://transigen.staging.localhost>. Real Google sign-in on staging needs a
-real OAuth client in `deploy/env.staging` (see its comments).
+real OAuth client in `deploy/.env.staging` — copy it from
+`.env.staging.example`; it is gitignored, so the client secret is never
+committed (see its comments).
 
 ## Prod (shared k3s server)
 

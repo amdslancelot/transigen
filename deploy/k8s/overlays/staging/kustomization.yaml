@@ -2,7 +2,8 @@
 # locally built image, plain-HTTP ingress on transigen.staging.localhost (a
 # host distinct from gelp's staging.localhost — the two apps share the same
 # local cluster), and the in-cluster shared Postgres. The transigen-env Secret
-# is NOT a kustomize resource: stage.sh creates it from deploy/env.staging
+# is NOT a kustomize resource: stage.sh creates it from deploy/.env.staging
+# (or the committed .env.staging.example fallback)
 # (kubectl create secret --from-env-file) — no Secret YAML anywhere.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
