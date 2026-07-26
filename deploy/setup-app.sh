@@ -21,7 +21,7 @@
 #      (deploy/provision-db.sh piped into the postgres pod). There is no
 #      automatic re-provisioning: if the Postgres volume is ever
 #      re-initialised, re-run this script and restore from backup.
-#   3. Creates the gitignored deploy/env.prod from env.prod.example with the
+#   3. Creates the gitignored deploy/.env.prod from .env.prod.example with the
 #      DB password and a generated AUTH_SECRET filled in (Google OAuth values
 #      stay placeholders — fill them in before sign-in will work). deploy.sh
 #      creates the transigen-env Secret from this file on every deploy.
@@ -83,15 +83,15 @@ log "the transigen database from backup."
 
 # --- 3. App secrets ----------------------------------------------------------
 
-ENV_FILE="${APP_DIR}/deploy/env.prod"
+ENV_FILE="${APP_DIR}/deploy/.env.prod"
 if [ -f "${ENV_FILE}" ]; then
   log "Env file already exists at ${ENV_FILE}; leaving it as-is"
 else
-  log "Creating ${ENV_FILE} from env.prod.example (DB password + AUTH_SECRET filled)"
+  log "Creating ${ENV_FILE} from .env.prod.example (DB password + AUTH_SECRET filled)"
   AUTH_SECRET_VALUE="$(openssl rand -base64 32)"
   sed -e "s|replace-with-transigen-db-password|${TRANSIGEN_DB_PASSWORD}|" \
       -e "s|replace-with-openssl-rand-base64-32|${AUTH_SECRET_VALUE}|" \
-      "${APP_DIR}/deploy/env.prod.example" > "${ENV_FILE}"
+      "${APP_DIR}/deploy/.env.prod.example" > "${ENV_FILE}"
   chmod 600 "${ENV_FILE}"
   log "NOTE: AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET are still placeholders in ${ENV_FILE}."
   log "Fill them in (Google Cloud Console OAuth client) or sign-in will not work."

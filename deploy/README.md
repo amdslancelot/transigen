@@ -40,9 +40,9 @@ See the root `README.md` setup section.
 - `k8s/overlays/prod/` — shared k3s server, namespace `transigen`, image tag
   `latest`, host `${TRANSIGEN_HOST}` with TLS via the existing
   `letsencrypt-prod` ClusterIssuer.
-- `env.staging` / `env.prod.example` — values for the `transigen-env` Secret,
+- `env.staging` / `.env.prod.example` — values for the `transigen-env` Secret,
   following snoopy_home's password policy: real passwords live only in the
-  gitignored `deploy/env.prod` on the server (dev/test values in `env.staging`
+  gitignored `deploy/.env.prod` on the server (dev/test values in `env.staging`
   are committed), and the Secret is created from the env file at deploy time —
   no Secret YAML anywhere.
 - `stage.sh` — build with podman → load into minikube → verify the shared
@@ -91,7 +91,7 @@ bash deploy/setup-app.sh
 Then: point DNS at the server, add the GitHub webhook
 (`http://<server-ip>:9000/hooks/deploy-transigen`, push events, the same
 secret), and fill the `AUTH_GOOGLE_*` values in the server-local gitignored
-`deploy/env.prod`, then re-run `deploy/deploy.sh`. Every push to `main`
+`deploy/.env.prod`, then re-run `deploy/deploy.sh`. Every push to `main`
 afterwards rebuilds the image on the server and rolls the deployment.
 
 Known gaps inherited from the gelp pattern, unchanged: no automated rollback

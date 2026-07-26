@@ -94,7 +94,7 @@ fi
 # 4. Apply the prod Kustomize overlay. The host is baked into the overlay
 #    (transigen.lans-h.cc) — no placeholder substitution needed. Secrets are
 #    NOT part of the overlay: real values live only in the gitignored
-#    deploy/env.prod and the transigen-env Secret is created from it here —
+#    deploy/.env.prod and the transigen-env Secret is created from it here —
 #    no Secret YAML anywhere.
 # ---------------------------------------------------------------------------
 PROD_OVERLAY="${SCRIPT_DIR}/k8s/overlays/prod"
@@ -103,20 +103,20 @@ echo "==> Applying prod overlay from ${PROD_OVERLAY}"
 # Ensure the namespace exists before secrets are applied into it.
 kubectl apply -f "${PROD_OVERLAY}/namespace.yaml"
 
-ENV_FILE="${SCRIPT_DIR}/env.prod"
+ENV_FILE="${SCRIPT_DIR}/.env.prod"
 if [ -f "${ENV_FILE}" ]; then
-  echo "==> Creating/refreshing the transigen-env Secret from deploy/env.prod"
+  echo "==> Creating/refreshing the transigen-env Secret from deploy/.env.prod"
   kubectl -n transigen create secret generic transigen-env \
     --from-env-file="${ENV_FILE}" \
     --dry-run=client -o yaml | kubectl apply -f -
 elif kubectl get secret transigen-env -n transigen >/dev/null 2>&1; then
-  echo "==> deploy/env.prod not found; existing transigen-env Secret left as-is"
+  echo "==> deploy/.env.prod not found; existing transigen-env Secret left as-is"
 else
   echo "##############################################################"
   echo "# WARNING: the transigen-env secret is missing and no"
   echo "# ${ENV_FILE}"
   echo "# was found. The app will not start until it exists."
-  echo "# Copy deploy/env.prod.example to deploy/env.prod, fill in real"
+  echo "# Copy deploy/.env.prod.example to deploy/.env.prod, fill in real"
   echo "# values (chmod 600), then re-run this script."
   echo "# Continuing deployment without it."
   echo "##############################################################"
