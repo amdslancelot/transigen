@@ -261,7 +261,7 @@ export function TransitionComposer({
 
   return (
     <section className="panel col">
-      <h2>Create New Transition</h2>
+      <h2 className="wall-label" style={{ margin: "0 0 0.25rem" }}>Create New Transition</h2>
       <form className="col" action={formAction}>
         <div className="row">
           <div className="col" style={{ flex: 1 }}>
@@ -283,11 +283,6 @@ export function TransitionComposer({
               className="secondary"
               onClick={startNewFromSongB}
               disabled={!toId}
-              title={
-                !toId
-                  ? "Enter a valid Song B YouTube URL or ID first"
-                  : "Open a new tab: Song A is this Song B; Song B is empty; metadata is prefilled"
-              }
             >
               Start New From Song B
             </button>
@@ -319,11 +314,11 @@ export function TransitionComposer({
               onBlur={clampEndField}
               required
             />
-            <span className="muted" style={{ fontSize: "0.85rem" }}>
-              {durA != null
-                ? `0:00–${formatMinSec(durA)} (within video length)`
-                : "Format minutes:seconds, seconds may use decimals (e.g. 0:05.25)."}
-            </span>
+            {durA != null ? (
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                0:00–{formatMinSec(durA)}
+              </span>
+            ) : null}
           </div>
           <div className="col" style={{ flex: 1 }}>
             <label htmlFor="startNextSec">Start time on Song B (m:ss.fff)</label>
@@ -339,11 +334,11 @@ export function TransitionComposer({
               onBlur={clampStartField}
               required
             />
-            <span className="muted" style={{ fontSize: "0.85rem" }}>
-              {durB != null
-                ? `0:00–${formatMinSec(durB)} (within video length)`
-                : "Format minutes:seconds, seconds may use decimals (e.g. 0:05.25)."}
-            </span>
+            {durB != null ? (
+              <span className="muted" style={{ fontSize: "0.85rem" }}>
+                0:00–{formatMinSec(durB)}
+              </span>
+            ) : null}
           </div>
         </div>
 
@@ -404,7 +399,6 @@ export function TransitionComposer({
                   className="secondary"
                   onClick={requestAutoBpm}
                   disabled={!fromId || bpmPending}
-                  title={!fromId ? "Enter Song A first" : "Look up BPM via Spotify"}
                 >
                   {bpmPending ? "Looking up…" : "Auto BPM"}
                 </button>
@@ -425,13 +419,13 @@ export function TransitionComposer({
         </div>
 
         {!windowOk && endParsed != null && Number.isFinite(endParsed) ? (
-          <p className="muted" style={{ color: "#fca5a5" }}>
-            End time on A must be at least {plan.window.toFixed(2)}s for this preset (stutter/echo/fade window).
+          <p className="muted" style={{ color: "var(--danger-soft)" }}>
+            End time on A must be at least {plan.window.toFixed(2)}s for this preset.
           </p>
         ) : null}
 
         {state?.ok === false ? (
-          <p style={{ color: "#fca5a5", margin: 0 }}>{state.error}</p>
+          <p style={{ color: "var(--danger-soft)", margin: 0 }}>{state.error}</p>
         ) : null}
         {state?.ok ? <p className="muted" style={{ margin: 0 }}>{state.message ?? "Saved."}</p> : null}
 
@@ -460,11 +454,7 @@ export function TransitionComposer({
 
 function MetaHint({ videoId, state }: { videoId: string | null; state: MetaState }) {
   if (!videoId) {
-    return (
-      <span className="muted" style={{ fontSize: "0.85rem" }}>
-        Paste a valid YouTube link or 11-char ID.
-      </span>
-    );
+    return null;
   }
   if (state.status === "loading") {
     return (
@@ -475,8 +465,8 @@ function MetaHint({ videoId, state }: { videoId: string | null; state: MetaState
   }
   if (state.status === "error") {
     return (
-      <span style={{ fontSize: "0.85rem", color: "#fca5a5" }}>
-        {state.error} (you can still set times manually)
+      <span style={{ fontSize: "0.85rem", color: "var(--danger-soft)" }}>
+        {state.error}
       </span>
     );
   }
@@ -513,7 +503,7 @@ function BpmHint({
     );
   if (state.status === "error")
     return (
-      <span style={{ fontSize: "0.85rem", color: "#fca5a5" }}>
+      <span style={{ fontSize: "0.85rem", color: "var(--danger-soft)" }}>
         Auto BPM failed: {state.error}
       </span>
     );

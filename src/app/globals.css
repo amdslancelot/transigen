@@ -1,6 +1,39 @@
+/*
+ * Transigen visual language: "listening room".
+ * Reference: a daylight gallery set — warm orange-tinted beige walls, a powder
+ * blue floor and alcove, performers and gear in near-black, chrome stool legs.
+ * Light theme. Every color in the app must come from these tokens; component
+ * files reference var(--*) and never hard-code hex values.
+ */
+
 :root {
-  color-scheme: dark;
-  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color-scheme: light;
+  /* Both custom properties are injected by next/font in src/app/layout.tsx:
+   * --font-sans is Inter (UI and body text), --font-display is Fraunces
+   * (headings only, the gallery-invitation voice). */
+  font-family: var(--font-sans), Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+
+  /* Room surfaces: warm beige walls, cream panels hung on them. */
+  --bg: #f1eade;
+  --surface: #faf6ee;
+  --surface-2: #e7dfcf;
+  --border: #dcd2bf;
+
+  /* Foreground: the all-black figures and decks. */
+  --ink: #1b1a17;
+  --muted: #857c6b;
+
+  /* The powder blue floor/wall: calm accent, never neon. */
+  --accent: #a9c7e8;
+  --accent-surface: #d9e5f2;
+  --accent-ink: #2e4e74;
+
+  /* Progress/playhead blue, one step deeper than the accent surface. */
+  --accent-strong: #6f97c4;
+
+  /* Errors stay warm and muted so they belong to the room. */
+  --danger: #b2483a;
+  --danger-soft: #c97b6e;
 }
 
 * {
@@ -9,8 +42,13 @@
 
 body {
   margin: 0;
-  background: #0f1115;
-  color: #f3f4f6;
+  min-height: 100vh;
+  /* Flat beige. Panel verdict (docs/design/ui-next-gen-persona-panel-2026-07-28.md):
+   * blue is state, never style — the blue floor appears only while playback is
+   * alive, so the resting page carries no static blue. */
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -19,16 +57,19 @@ a {
 }
 
 .container {
-  max-width: 1080px;
+  /* Wide and tight: every page should fit one viewport without scrolling,
+   * so horizontal space does the work vertical stacking used to do. */
+  max-width: 1280px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 0.75rem 1rem;
 }
 
 .panel {
-  background: #171a21;
-  border: 1px solid #2a2f3a;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 1rem;
+  padding: 0.75rem;
+  box-shadow: 0 1px 2px rgba(27, 26, 23, 0.04);
 }
 
 .row {
@@ -45,40 +86,353 @@ a {
 }
 
 button {
-  background: #3b82f6;
-  color: white;
+  background: var(--ink);
+  color: var(--surface);
   border: 0;
   border-radius: 8px;
   padding: 0.5rem 0.75rem;
   cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s ease-out, transform 0.12s ease-out;
+}
+
+button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button:hover:not(:disabled) {
+  background: #2e2c27;
 }
 
 button.secondary {
-  background: #303544;
+  /* Neutral, not blue: the accent is reserved for live playback state. */
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+button.secondary:hover:not(:disabled) {
+  background: var(--border);
 }
 
 button:disabled {
-  opacity: 0.5;
+  opacity: 0.45;
   cursor: not-allowed;
 }
 
 input,
 select,
 textarea {
-  background: #0f1115;
-  color: #f3f4f6;
-  border: 1px solid #2a2f3a;
+  background: #fdfbf6;
+  color: var(--ink);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 0.5rem 0.625rem;
 }
 
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 1px;
+}
+
+h1,
+h2 {
+  font-family: var(--font-display), Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  margin: 0.25rem 0;
+}
+
+h1 {
+  font-size: 2rem;
+  line-height: 1.1;
+}
+
+h2 {
+  font-size: 1.25rem;
+}
+
 .muted {
-  color: #9ca3af;
+  color: var(--muted);
+}
+
+/*
+ * Museum wall label: the small uppercase caption hung next to an artwork.
+ * Used for every section heading (Popular rooms, Set List, ...).
+ */
+.wall-label {
+  /* Demoted per the panel: lowercase whisper, no longer a museum placard. */
+  text-transform: lowercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  font-weight: 500;
+  font-family: var(--font-sans), Inter, system-ui, sans-serif;
+  color: var(--muted);
+}
+
+/*
+ * Room list rows (replaces framed cards): a room is a line — large title,
+ * hairline rule, ink on beige. The list itself is the design.
+ */
+.rule-row {
+  display: block;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid var(--border);
+  transition: padding-left 0.15s ease-out;
+}
+
+.rule-row:hover {
+  padding-left: 0.5rem;
+}
+
+.rule-row-title {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.25rem;
+  line-height: 1.15;
+}
+
+/*
+ * The one wrong thing: an unexplained empty slot. Clicking it creates a room.
+ * Deliberately off-grid — no label, no fill, dashed void.
+ */
+.empty-slot {
+  display: block;
+  border: 1px dashed var(--muted);
+  border-radius: 2px;
+  min-height: 2.5rem;
+  background: transparent;
+  transform: rotate(-0.4deg);
+  transition: border-color 0.15s ease-out;
+}
+
+.empty-slot:hover {
+  border-color: var(--ink);
+}
+
+/*
+ * Room entry: the detail page scales up from slightly small to full size,
+ * as if stepping into the room. Applied to the room page's <main>.
+ */
+.page-enter {
+  animation: page-enter 0.28s ease-out;
+  transform-origin: 50% 30%;
+}
+
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-enter {
+    animation: none;
+  }
+}
+
+/*
+ * Fixed top bar: the one persistent piece of chrome. Wordmark left, lowercase
+ * nav center-left, account on the right. Beige translucent over content.
+ */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  height: 44px;
+  padding: 0 1rem;
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar-wordmark {
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+}
+
+.topbar a.topbar-link {
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: lowercase;
+  color: var(--muted);
+  padding: 0.15rem 0;
+  border-bottom: 1px solid transparent;
+}
+
+.topbar a.topbar-link:hover {
+  color: var(--ink);
+}
+
+.topbar a.topbar-link[aria-current="page"] {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* Push page content below the fixed bar. */
+body {
+  padding-top: 44px;
+}
+
+/*
+ * Honest telemetry: one small monospace line pinned to the bottom edge.
+ * Raw readings only (bpm math, buffer state, "echo: simulated"). Replaces
+ * every spinner. Whisper volume, always visible.
+ */
+.telemetry {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  padding: 0.3rem 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.68rem;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  border-top: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * Transition-as-event: while a handoff runs, the beige withdraws to black in
+ * one hard 150ms cut and nothing else on screen moves. The stage holds a
+ * full-width bar sweeping in real beat time plus a countdown in bars.
+ */
+/*
+ * Transition event, de-dramatized per client feedback: not a full-screen
+ * takeover but a slim dark band docked above the telemetry strip — countdown
+ * on the left, a bar sweeping in real beat time across the rest.
+ */
+.transition-stage {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 1.5rem;
+  z-index: 30;
+  background: #111009;
+  color: var(--surface);
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.4rem 0.75rem;
+  animation: stage-cut 0.15s ease-out;
+}
+
+@keyframes stage-cut {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.transition-count {
+  font-family: var(--font-sans), Inter, system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 1.1rem;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.transition-bar-track {
+  flex: 1;
+  height: 4px;
+  background: #2a2822;
+}
+
+.transition-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+}
+
+/*
+ * Framed artwork: a card matted like the pictures on the reference room's
+ * wall. Put the thumbnail inside; the padding is the mat board.
+ */
+.frame {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  box-shadow: 0 1px 3px rgba(27, 26, 23, 0.06);
+  transition: transform 0.18s ease-out, box-shadow 0.18s ease-out;
+}
+
+.frame:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(27, 26, 23, 0.1);
+}
+
+/*
+ * Hardware: the one dark island in the app — the DJ gear sitting in the
+ * light room. Player controls live here. Buttons inside invert.
+ */
+.hardware {
+  background: var(--ink);
+  color: var(--surface);
+  border: 1px solid #33312b;
+  border-radius: 14px;
+  padding: 1.25rem;
+  box-shadow: 0 10px 28px rgba(27, 26, 23, 0.28);
+}
+
+.hardware .muted {
+  color: #a49b88;
+}
+
+.hardware button {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.hardware button:hover:not(:disabled) {
+  background: var(--accent-surface);
+}
+
+.hardware button.secondary {
+  background: #2e2c27;
+  color: var(--surface);
+  border: 1px solid #45423a;
+}
+
+.hardware button.secondary:hover:not(:disabled) {
+  background: #3a372f;
+}
+
+/*
+ * Floor: the solid powder-blue ground the hardware stands on. Wrap the
+ * player section with it (full-bleed padding, no border).
+ */
+.floor {
+  background: var(--accent);
+  border-radius: 16px;
+  padding: 1.25rem;
 }
 
 .pill {
-  border: 1px solid #2a2f3a;
+  border: 1px solid var(--border);
   border-radius: 999px;
   padding: 0.2rem 0.6rem;
   font-size: 0.8rem;
+  background: var(--surface);
 }

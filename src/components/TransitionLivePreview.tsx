@@ -268,10 +268,6 @@ export function TransitionLivePreview({
 
   return (
     <div className="col" style={{ gap: "0.75rem" }}>
-      <p className="muted">
-        YouTube embed timing is approximate (seek jitter). Click Play preview once; browsers require a tap before
-        audio can start on the second player.
-      </p>
       <div className="row" style={{ alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
         <button type="button" onClick={handlePlayPreview} disabled={!playersReady || !readyToPreview}>
           Play preview

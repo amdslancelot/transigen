@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { query } from "@/lib/db";
 import { buildRoomPlaybackEdges, computeRoomSetLengthSec } from "@/lib/roomPlaybackEdges";
@@ -46,6 +45,45 @@ function formatArtistTrack(meta: YoutubeListMeta | undefined, videoId: string): 
   if (title) return title;
   return videoId;
 }
+
+/** Turn a preset code like "stutter_4" into a human label ("stutter · 4 bars"). */
+function formatPresetLabel(code: string | null | undefined): string | null {
+  if (!code) return null;
+  const parts = code.split("_");
+  const last = parts[parts.length - 1];
+  if (parts.length > 1 && /^\d+$/.test(last)) {
+    const n = Number(last);
+    return `${parts.slice(0, -1).join(" ")} · ${n} ${n === 1 ? "bar" : "bars"}`;
+  }
+  return parts.join(" ");
+}
+
+/* Set list entries render as catalog cards; the transition between two tracks
+ * renders as a slim "seam" connector between the cards (the seam is the work). */
+const setListCardStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "2.1rem minmax(0, 1fr)",
+  alignItems: "baseline",
+  background: "#fdfbf6",
+  border: "1px solid var(--border)",
+  borderRadius: 8,
+  padding: "0.5rem 0.65rem",
+};
+
+const setListNumStyle: React.CSSProperties = {
+  fontFamily: "var(--font-display), Georgia, serif",
+  fontSize: "1.05rem",
+  color: "var(--muted)",
+  fontVariantNumeric: "tabular-nums",
+};
+
+const seamStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  padding: "0.15rem 0 0.15rem 2.75rem",
+  fontSize: "0.72rem",
+};
 
 export default async function RoomPage(props: { params: Params }) {
   const user = await requireUser();
@@ -158,78 +196,91 @@ export default async function RoomPage(props: { params: Params }) {
   }
 
   return (
-    <main className="container col" style={{ gap: "1rem" }}>
+    <main className="container col page-enter" style={{ gap: "0.75rem" }}>
       <RoomPlayIncrement roomId={roomId} />
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", gap: "1rem", flexWrap: "wrap" }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
         {typedRoom.owner_id === user.id ? (
           <RoomTitleBar roomId={roomId} initialTitle={typedRoom.title} />
         ) : (
           <h1 style={{ margin: 0 }}>{typedRoom.title}</h1>
         )}
-        <div className="row">
-          <Link className="pill" href="/room">
-            All rooms
-          </Link>
-          <Link className="pill" href="/transition">
-            Transition page
-          </Link>
+        <div className="row" style={{ gap: "0.5rem" }}>
           <span className="pill">Set length {formatSec(totalSeconds)}</span>
-          {overLimit ? <span className="pill" style={{ borderColor: "#ef4444" }}>Over 1 hour</span> : null}
+          {overLimit ? <span className="pill" style={{ borderColor: "var(--danger)" }}>Over 1 hour</span> : null}
         </div>
       </div>
 
-      <section className="panel col">
-        <h2>Full set playback</h2>
-        <p className="muted">
-          The room start track is preloaded on Player 1. After you add songs from saved transitions below, this
-          section plays the whole chain with each transition&apos;s preset (fade / echo / stutter).
-        </p>
-        <TrackIngestStatus videoIds={allVideoIds} />
-        <RoomFullSetPlayer edges={playbackEdges} startVideoId={startVid} />
-      </section>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 380px)",
+          gap: "0.75rem",
+          alignItems: "start",
+        }}
+      >
+        <section className="panel col">
+          <h2 className="wall-label">Full set playback</h2>
+          <TrackIngestStatus videoIds={allVideoIds} />
+          <RoomFullSetPlayer edges={playbackEdges} startVideoId={startVid} />
+        </section>
 
-      <section className="panel col">
-        <h2>Extend set from saved transitions</h2>
-        <RoomChainPicker
-          roomId={roomId}
-          extendFromVideoId={extendFromVideoId}
-          overLimit={overLimit}
-          initialTrackLabels={initialTrackLabels}
-        />
-        {overLimit ? <p className="muted">Set is at the 1 hour cap; trim before adding more.</p> : null}
-      </section>
-
-      <section className="panel col">
-        <h2>Set List</h2>
-        <div className="col">
-          <div className="row" style={{ alignItems: "flex-start" }}>
-            <strong>0.</strong>
-            <div className="col">
-              <span>{formatArtistTrack(trackMetaById.get(startVid), startVid)}</span>
-              <span className="muted">YouTube: {startVid || "—"}</span>
-            </div>
-          </div>
-          {items.map((item) => {
-            const proposal = item.best_proposal_id_from_prev
-              ? proposalsById.get(item.best_proposal_id_from_prev)
-              : null;
-            const presetCode = proposal?.transition_presets?.code ?? "—";
-            const vid = item.media.videoId ?? "";
-            return (
-              <div key={item.id} className="row" style={{ alignItems: "flex-start" }}>
-                <strong>{item.position}.</strong>
-                <div className="col">
-                  <span>{formatArtistTrack(trackMetaById.get(vid), vid)}</span>
-                  <span className="muted">
-                    A end {formatMinSec(proposal?.end_prev_sec)} / B start {formatMinSec(proposal?.start_next_sec)} · preset{" "}
-                    {presetCode} · {vid}
-                  </span>
+        <div className="col" style={{ gap: "0.75rem", minWidth: 0 }}>
+          <section className="panel col">
+            <h2 className="wall-label">Set List</h2>
+            <div
+              className="col"
+              style={{ overflowY: "auto", maxHeight: "max(200px, calc(100vh - 460px))", gap: "0.6rem" }}
+            >
+              <div style={setListCardStyle}>
+                <span style={setListNumStyle}>1</span>
+                <div className="col" style={{ gap: "0.1rem", minWidth: 0 }}>
+                  <span style={{ fontWeight: 500 }}>{formatArtistTrack(trackMetaById.get(startVid), startVid)}</span>
+                  <span className="muted" style={{ fontSize: "0.72rem" }}>opens the set</span>
                 </div>
               </div>
-            );
-          })}
+              {items.map((item) => {
+                const proposal = item.best_proposal_id_from_prev
+                  ? proposalsById.get(item.best_proposal_id_from_prev)
+                  : null;
+                const presetLabel = formatPresetLabel(proposal?.transition_presets?.code);
+                const vid = item.media.videoId ?? "";
+                return (
+                  <div key={item.id} className="col" style={{ gap: "0.2rem" }}>
+                    <div className="muted" style={seamStyle}>
+                      <span style={{ whiteSpace: "nowrap" }}>
+                        out {formatMinSec(proposal?.end_prev_sec)} → in {formatMinSec(proposal?.start_next_sec)}
+                      </span>
+                      {presetLabel ? (
+                        <span className="pill" style={{ fontSize: "0.66rem", padding: "0.05rem 0.45rem" }}>
+                          {presetLabel}
+                        </span>
+                      ) : null}
+                      <span aria-hidden style={{ flex: 1, borderBottom: "1px dashed var(--border)" }} />
+                    </div>
+                    <div style={setListCardStyle}>
+                      <span style={setListNumStyle}>{item.position + 1}</span>
+                      <div className="col" style={{ gap: "0.1rem", minWidth: 0 }}>
+                        <span style={{ fontWeight: 500 }}>{formatArtistTrack(trackMetaById.get(vid), vid)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="panel col">
+            <h2 className="wall-label">extend the set</h2>
+            <RoomChainPicker
+              roomId={roomId}
+              extendFromVideoId={extendFromVideoId}
+              overLimit={overLimit}
+              initialTrackLabels={initialTrackLabels}
+            />
+            {overLimit ? <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>set is at the one-hour cap</p> : null}
+          </section>
         </div>
-      </section>
+      </div>
     </main>
   );
 }

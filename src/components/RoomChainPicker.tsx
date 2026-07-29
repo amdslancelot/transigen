@@ -79,7 +79,7 @@ export function RoomChainPicker({
         })
         .catch((e: unknown) => {
           if (guard !== listFetchGuard.current) return;
-          setErr(e instanceof Error ? e.message : "Failed to load transitions");
+          setErr(e instanceof Error ? e.message : "could not load transitions");
         })
         .finally(() => {
           inFlight.current.delete(id);
@@ -116,62 +116,115 @@ export function RoomChainPicker({
         setPath([]);
         router.refresh();
       } catch (e) {
-        setErr(e instanceof Error ? e.message : "Could not save set");
+        setErr(e instanceof Error ? e.message : "could not save the set");
       }
     });
   };
 
   return (
-    <div className="col" style={{ gap: "0.75rem" }}>
-      <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem", alignItems: "flex-start" }}>
-        <p className="muted" style={{ flex: "1 1 12rem", margin: 0 }}>
-          Only transitions already saved (see <Link href="/transition">/transition</Link>) appear here. Pick a chain,
-          then confirm once to append it. The highest-voted proposal is used for each link.
-        </p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={refreshTransitionLists}
-          title="Reload saved next-song options (e.g. after someone adds a transition)"
-        >
-          Refresh
-        </button>
-      </div>
-      <p>
-        Extending from: <strong>{labelFor(extendFromVideoId)}</strong>
-        <span className="muted" style={{ marginLeft: "0.35rem", fontFamily: "monospace", fontSize: "0.85em" }}>
-          {extendFromVideoId}
-        </span>
-      </p>
+    <div className="col" style={{ gap: "0.85rem" }}>
+      <style>{`
+        button.chain-card {
+          background: var(--surface);
+          color: var(--ink);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 0.4rem 0.55rem;
+          text-align: left;
+          display: flex;
+          flex-direction: column;
+          gap: 0.1rem;
+          min-width: 0;
+        }
+        button.chain-card:hover:not(:disabled) {
+          background: var(--surface);
+          border-color: var(--muted);
+        }
+        button.chain-card-selected,
+        button.chain-card-selected:hover:not(:disabled) {
+          background: var(--ink);
+          border-color: var(--ink);
+          color: var(--surface);
+        }
+        .chain-card-title {
+          font-size: 0.8rem;
+          font-weight: 500;
+          line-height: 1.25;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .chain-card-id {
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          font-size: 0.68rem;
+          color: var(--muted);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        button.chain-card-selected .chain-card-id {
+          color: var(--surface);
+          opacity: 0.6;
+        }
+      `}</style>
       {levels.map(({ fromId, depth }) => {
         const opts = cache[fromId] ?? [];
         return (
           <div key={`${fromId}-${depth}`} className="col" style={{ gap: "0.35rem" }}>
-            <span className="muted">
-              From <strong>{labelFor(fromId)}</strong> → pick next
-            </span>
+            <div className="row" style={{ gap: "0.45rem", alignItems: "baseline", flexWrap: "nowrap" }}>
+              <span
+                className="muted"
+                style={{
+                  fontSize: "0.75rem",
+                  flex: "1 1 auto",
+                  minWidth: 0,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                after {labelFor(fromId)}
+              </span>
+              {depth === 0 ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ fontSize: "0.72rem", padding: "0.25rem 0.55rem", flex: "0 0 auto" }}
+                  onClick={refreshTransitionLists}
+                >
+                  refresh
+                </button>
+              ) : null}
+            </div>
             {opts.length === 0 && loadingCount === 0 ? (
-              <p className="muted">
-                No saved transitions from this song yet. Add one on{" "}
-                <Link href="/transition/new">/transition/new</Link>.
+              <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+                no saved transitions from here yet —{" "}
+                <Link href="/transition/new" style={{ textDecoration: "underline" }}>
+                  add one
+                </Link>
               </p>
             ) : opts.length === 0 && loadingCount > 0 ? (
-              <span className="muted">Loading…</span>
+              <span className="muted" style={{ fontSize: "0.75rem" }}>
+                loading…
+              </span>
             ) : (
-              <div className="row" style={{ flexWrap: "wrap", gap: "0.35rem" }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(9.5rem, 1fr))",
+                  gap: "0.4rem",
+                }}
+              >
                 {opts.map((vid) => (
                   <button
                     key={vid}
                     type="button"
-                    className={path[depth] === vid ? "pill" : "secondary"}
-                    style={{ maxWidth: "100%", textAlign: "left" }}
+                    className={path[depth] === vid ? "chain-card chain-card-selected" : "chain-card"}
                     title={vid}
                     onClick={() => handlePick(depth, vid)}
                   >
-                    <span style={{ display: "block", fontWeight: 600 }}>{labelFor(vid)}</span>
-                    <span className="muted" style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
-                      {vid}
-                    </span>
+                    <span className="chain-card-title">{labelFor(vid)}</span>
+                    <span className="chain-card-id">{vid}</span>
                   </button>
                 ))}
               </div>
@@ -179,26 +232,28 @@ export function RoomChainPicker({
           </div>
         );
       })}
-      {err ? <p style={{ color: "#f87171" }}>{err}</p> : null}
-      <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
-        <button type="button" className="secondary" onClick={() => setPath([])} disabled={path.length === 0}>
-          Clear preview
-        </button>
-        <button type="button" onClick={handleConfirm} disabled={path.length === 0 || overLimit || isPending}>
-          {isPending ? "Saving…" : "Confirm add to set"}
-        </button>
-      </div>
+      {err ? (
+        <p style={{ color: "var(--danger)", fontSize: "0.75rem", margin: 0 }}>{err}</p>
+      ) : null}
       {path.length > 0 ? (
-        <p className="muted">
-          Preview tail:{" "}
+        <p className="muted" style={{ margin: 0, fontSize: "0.75rem" }}>
+          queued:{" "}
           {path.map((id, i) => (
             <span key={`${id}-${i}`}>
               {i > 0 ? " → " : null}
-              <strong>{labelFor(id)}</strong>
+              {labelFor(id)}
             </span>
           ))}
         </p>
       ) : null}
+      <div className="row" style={{ gap: "0.5rem" }}>
+        <button type="button" onClick={handleConfirm} disabled={path.length === 0 || overLimit || isPending}>
+          {isPending ? "saving…" : "add to set"}
+        </button>
+        <button type="button" className="secondary" onClick={() => setPath([])} disabled={path.length === 0}>
+          clear
+        </button>
+      </div>
     </div>
   );
 }

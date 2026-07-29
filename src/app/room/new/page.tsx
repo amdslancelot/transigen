@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createRoom } from "@/app/actions";
 import { requireUser } from "@/lib/auth";
@@ -14,17 +13,7 @@ export default async function NewRoomPage() {
 
   return (
     <main className="container col" style={{ gap: "1rem" }}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>Create room set</h1>
-        <div className="row">
-          <Link className="pill" href="/room">
-            All rooms
-          </Link>
-          <Link className="pill" href="/transition">
-            Transition page
-          </Link>
-        </div>
-      </div>
+      <h1>Create room set</h1>
       <section className="panel col">
         <form action={createRoomAction} className="col">
           <label htmlFor="title">Set title</label>

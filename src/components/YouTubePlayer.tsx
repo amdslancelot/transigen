@@ -134,7 +134,7 @@ export function YouTubePlayer({ label, videoId, startAt, onTime }: Props) {
         <span className="muted">t={formatMinSec(now)}</span>
       </div>
       {apiError ? (
-        <p style={{ color: "#fca5a5", margin: 0 }}>{apiError}</p>
+        <p style={{ color: "var(--danger-soft)", margin: 0 }}>{apiError}</p>
       ) : null}
       <div id={containerId} />
       <WaveformLikeVisualizer currentSec={now} durationSec={durationSec} label={`${label} waveform`} />

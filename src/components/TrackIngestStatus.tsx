@@ -29,5 +29,5 @@ export function TrackIngestStatus({ videoIds }: { videoIds: string[] }) {
 
   if (videoIds.length === 0 || doneCount >= videoIds.length) return null;
 
-  return <div className="muted">分析中 {doneCount}/{videoIds.length} 首</div>;
+  return <div className="muted">Analyzing {doneCount}/{videoIds.length} tracks…</div>;
 }
