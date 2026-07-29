@@ -256,24 +256,30 @@ export default async function RoomsIndexPage(props: { searchParams: Params }) {
           </span>
         </div>
 
-        <form action="/room" method="get" className="row" style={{ gap: "0.5rem", flexWrap: "wrap" }}>
-          <input
-            type="search"
-            name="q"
-            defaultValue={query}
-            placeholder="Search by track title…"
-            aria-label="Search rooms by track title"
-            style={{ minWidth: "min(100%, 280px)", flex: "1 1 220px" }}
+        <div className="row" style={{ gap: "0.75rem", alignItems: "center", flexWrap: "wrap" }}>
+          <form action="/room" method="get" className="row" style={{ gap: "0.5rem", flexWrap: "nowrap" }}>
+            <input
+              type="search"
+              name="q"
+              defaultValue={query}
+              placeholder="Search by track title…"
+              aria-label="Search rooms by track title"
+              style={{ width: "min(100%, 260px)" }}
+            />
+            <button type="submit">Search</button>
+            {query ? (
+              <Link className="pill" href="/room" style={{ borderColor: "var(--surface-2)", background: "var(--surface-2)" }}>
+                Clear
+              </Link>
+            ) : null}
+          </form>
+          <Link
+            href="/room/new"
+            className="empty-slot"
+            aria-label="Create a room"
+            style={{ width: 180, minHeight: "2.1rem" }}
           />
-          <button type="submit">Search</button>
-          {query ? (
-            <Link className="pill" href="/room" style={{ borderColor: "var(--surface-2)", background: "var(--surface-2)" }}>
-              Clear
-            </Link>
-          ) : null}
-        </form>
-
-        <Link href="/room/new" className="empty-slot" aria-label="Create a room" />
+        </div>
 
         {listErrMsg ? (
           <p style={{ color: "var(--danger)" }}>
@@ -288,7 +294,12 @@ export default async function RoomsIndexPage(props: { searchParams: Params }) {
               const plays = room.play_count ?? 0;
               const preview = previewByRoomId.get(room.id);
               return (
-                <Link key={room.id} href={`/room/${room.id}`} className="rule-row" style={{ breakInside: "avoid" }}>
+                <Link
+                  key={room.id}
+                  href={`/room/${room.id}`}
+                  className="rule-row frost"
+                  style={{ breakInside: "avoid", padding: "0.7rem 0.85rem", marginBottom: "0.75rem", borderBottom: "1px solid color-mix(in srgb, var(--border) 65%, transparent)" }}
+                >
                   <div className="rule-row-title">{room.title}</div>
                   <span className="muted" style={{ fontSize: "0.85rem", lineHeight: 1.3 }}>
                     {plays} plays · {room.slug}

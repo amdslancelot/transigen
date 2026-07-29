@@ -43,10 +43,18 @@
 body {
   margin: 0;
   min-height: 100vh;
-  /* Flat beige. Panel verdict (docs/design/ui-next-gen-persona-panel-2026-07-28.md):
-   * blue is state, never style — the blue floor appears only while playback is
-   * alive, so the resting page carries no static blue. */
-  background: var(--bg);
+  /* The room photograph is the site background (client direction), washed
+   * with translucent beige so ink text stays readable over the busy areas.
+   * The flat --bg color remains the fallback while the image loads. */
+  background-color: var(--bg);
+  background-image: linear-gradient(
+      color-mix(in srgb, var(--bg) 62%, transparent),
+      color-mix(in srgb, var(--bg) 46%, transparent)
+    ),
+    url("/room-bg.jpg");
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -209,6 +217,18 @@ h2 {
 
 .empty-slot:hover {
   border-color: var(--ink);
+}
+
+/*
+ * Frosted surface: for content sitting directly on the photo background.
+ * Same language as the top bar — translucent cream over the room.
+ */
+.frost {
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
+  border-radius: 10px;
 }
 
 /*
