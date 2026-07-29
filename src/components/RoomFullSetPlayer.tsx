@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { formatMinSec } from "@/lib/timeInput";
 import { EchoPresetDebugPanel } from "@/components/EchoPresetDebugPanel";
+import { TelemetryStrip } from "@/components/TelemetryStrip";
 import type { PlaybackEdge } from "@/lib/roomPlaybackEdges";
 import { finishHandoffToB, primeIncomingDeckMuted } from "@/lib/transitionHandoff";
 import { buildPresetPlan } from "@/lib/transitionPresetPlan";
@@ -62,6 +63,17 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
   const [tB, setTB] = useState(0);
   const [modeLabel, setModeLabel] = useState("");
   const [echoDebugSnapshot, setEchoDebugSnapshot] = useState<EchoPresetTickDebug | null>(null);
+  /**
+   * UI-only overlay state for the transition-as-event stage. Derived each RAF
+   * frame in edgeLoop from the same values the tick already uses (tAv, the
+   * edge's endPrevSec, and the preset plan window); it never feeds back into
+   * playback logic.
+   */
+  const [transitionOverlay, setTransitionOverlay] = useState<{
+    barsLeft: number | null;
+    presetCode: string;
+    progress: number;
+  } | null>(null);
 
   const stopRaf = useCallback(() => {
     if (rafRef.current != null) {
@@ -83,6 +95,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     setPhase("done");
     setModeLabel("Finished");
     setEchoDebugSnapshot(null);
+    setTransitionOverlay(null);
   }, [stopRaf]);
 
   const tailTick = useCallback(() => {
@@ -117,6 +130,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
       tailEndSecRef.current = last?.durationB ?? DEFAULT_DUR;
     setModeLabel("Outro (last song)");
     setEchoDebugSnapshot(null);
+    setTransitionOverlay(null);
     rafRef.current = requestAnimationFrame(tailTick);
     },
     [tailTick],
@@ -158,6 +172,27 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
 
     setTA(tAv);
     setTB(tBv);
+
+    // Transition-stage overlay (UI only). The window start mirrors what the
+    // tick uses: the snapped echo/stutter anchor when one was seeded, else
+    // endPrevSec minus the plan window. hard_cut has window 0, so no overlay.
+    {
+      const overlayPlan = buildPresetPlan(edge.presetCode, edge.bpm, edge.fadeBars, edge.beat_offset);
+      const overlayStart =
+        (overlayPlan.kind === "echo" || overlayPlan.kind === "stutter"
+          ? tickRef.current.echoStutterAnchor
+          : undefined) ?? edge.endPrevSec - overlayPlan.window;
+      if (overlayPlan.window > 0 && tAv >= overlayStart && tAv < edge.endPrevSec) {
+        const secPerBar = edge.bpm != null && edge.bpm > 0 ? (60 / edge.bpm) * 4 : null;
+        setTransitionOverlay({
+          presetCode: edge.presetCode,
+          barsLeft: secPerBar != null ? Math.max(1, Math.ceil((edge.endPrevSec - tAv) / secPerBar)) : null,
+          progress: Math.min(1, Math.max(0, (tAv - overlayStart) / (edge.endPrevSec - overlayStart))),
+        });
+      } else {
+        setTransitionOverlay(null);
+      }
+    }
 
     const echoPreset = buildPresetPlan(edge.presetCode, edge.bpm, edge.fadeBars, edge.beat_offset).kind === "echo";
     const shouldFinish = transitionPresetTickFrame(
@@ -371,6 +406,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     setUiEdgeIdx(0);
     setModeLabel(`Transition 1 / ${edgesRef.current.length}`);
     setEchoDebugSnapshot(null);
+    setTransitionOverlay(null);
 
     try {
       s0.loadVideoById({ videoId: e0.videoIdA, startSeconds: 0 });
@@ -407,6 +443,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     setPhase("idle");
     setModeLabel("Paused");
     setEchoDebugSnapshot(null);
+    setTransitionOverlay(null);
   }, [stopRaf]);
 
   const handleReset = useCallback(() => {
@@ -421,6 +458,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
     setTB(0);
     setModeLabel("");
     setEchoDebugSnapshot(null);
+    setTransitionOverlay(null);
 
     const list = edgesRef.current;
     if (list.length === 0) {
@@ -457,13 +495,23 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
   const hasStartDeck = chainReady || startVideoId.length > 0;
   const pauseDisabled = !playersReady || phase !== "playing";
 
+  // Telemetry readings: every value below is existing state/props, no synthesis.
+  // During the outro tail the audible deck is the last edge's B track, and there
+  // is no upcoming transition; per-edge bpm belongs to the outgoing A track, so
+  // it is unknown in the tail.
+  const inOutroTail = modeLabel === "Outro (last song)";
+  const telemetryDeckLabel = inOutroTail ? "deck B" : "deck A";
+  const telemetryDeckVideoId = inOutroTail ? (cur?.videoIdB ?? null) : (cur?.videoIdA ?? (startVideoId || null));
+  const telemetryBpm = inOutroTail ? null : (cur?.bpm ?? null);
+  const telemetryNext = inOutroTail
+    ? "none (outro)"
+    : cur
+      ? `${cur.presetCode}${cur.fadeBars != null ? ` ${cur.fadeBars} bars` : ""} @ ${formatMinSec(cur.endPrevSec)}`
+      : null;
+
   return (
-    <div className="col" style={{ gap: "0.75rem" }}>
-      <p className="muted">
-        Full-set playback uses the same fade / echo / stutter timing as the transition preview. YouTube seek timing
-        is still approximate between segments.
-        {!chainReady ? " Add songs from saved transitions below to enable the full chain." : null}
-      </p>
+    <div className={phase === "playing" ? "floor" : undefined}>
+    <div className="hardware col" style={{ gap: "0.75rem" }}>
       <div className="row" style={{ alignItems: "center", flexWrap: "wrap", gap: "0.5rem" }}>
         <button
           type="button"
@@ -480,7 +528,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
         </button>
         {!playersReady && hasStartDeck ? <span className="muted">Loading players…</span> : null}
         {!hasStartDeck ? <span className="muted">No room start video.</span> : null}
-        {phase === "done" ? <span className="pill">Done</span> : null}
+        {phase === "done" ? <span className="pill" style={{ color: "var(--ink)" }}>Done</span> : null}
       </div>
       {modeLabel ? (
         <p>
@@ -496,16 +544,11 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
             Incoming: t={formatMinSec(tB)} · cue {formatMinSec(cur.startNextSec)}
           </span>
         </div>
-      ) : (
-        <p className="muted">
-          Player 1 preloads the room start track. Player 2 shows a deck placeholder until your set has a first
-          incoming song.
-        </p>
-      )}
+      ) : null}
       <div className="row" style={{ alignItems: "flex-start", gap: "0.75rem", flexWrap: "wrap" }}>
         <div className="col" style={{ flex: "1 1 200px" }}>
           <strong>Player 1</strong>
-          {hasStartDeck ? <div id={id0} /> : <p className="muted">Add a start video when creating the room.</p>}
+          {hasStartDeck ? <div id={id0} /> : null}
         </div>
         <div className="col" style={{ flex: "1 1 200px" }}>
           <strong>Player 2</strong>
@@ -515,12 +558,13 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
             <div
               className="row"
               style={{
-                minHeight: 220,
+                height: 220,
+                width: "100%",
+                boxSizing: "border-box",
                 alignItems: "center",
                 justifyContent: "center",
                 borderRadius: 6,
-                border: "1px solid var(--border, #333)",
-                padding: "0.5rem",
+                border: "1px solid var(--border)",
               }}
             >
               <Image
@@ -528,7 +572,7 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
                 alt=""
                 width={280}
                 height={220}
-                style={{ width: "100%", maxWidth: 280, height: "auto", objectFit: "contain" }}
+                style={{ maxWidth: "100%", maxHeight: 200, width: "auto", height: "auto", objectFit: "contain" }}
               />
             </div>
           )}
@@ -539,6 +583,27 @@ export function RoomFullSetPlayer({ edges, startVideoId, deckPlaceholderSrc = "/
           </div>
         ) : null}
       </div>
+    </div>
+    {transitionOverlay ? (
+      <div className="transition-stage" aria-live="off">
+        <div className="transition-count">
+          {transitionOverlay.barsLeft != null
+            ? `${transitionOverlay.barsLeft} bars`
+            : transitionOverlay.presetCode}
+        </div>
+        <div className="transition-bar-track">
+          <div className="transition-bar" style={{ width: `${(transitionOverlay.progress * 100).toFixed(1)}%` }} />
+        </div>
+      </div>
+    ) : null}
+    <TelemetryStrip
+      deckLabel={telemetryDeckLabel}
+      deckVideoId={telemetryDeckVideoId}
+      deckSec={tA}
+      bpm={telemetryBpm}
+      nextLabel={telemetryNext}
+      phase={phase}
+    />
     </div>
   );
 }

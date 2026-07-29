@@ -85,7 +85,7 @@ export function RoomTitleBar({ roomId, initialTitle }: Props) {
               Cancel
             </button>
           </div>
-          {err ? <p style={{ color: "#f87171", margin: 0 }}>{err}</p> : null}
+          {err ? <p style={{ color: "var(--danger)", margin: 0 }}>{err}</p> : null}
         </div>
       )}
     </div>

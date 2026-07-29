@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { lookupYoutubeMeta, voteProposal, type YoutubeMetaResult } from "@/app/actions";
 import { DeleteProposalForm } from "@/components/DeleteProposalForm";
 import { TransitionComposer } from "@/components/TransitionComposer";
@@ -87,81 +86,77 @@ export default async function TransitionNewPage(props: { searchParams: SearchPar
   }
 
   return (
-    <main className="container col" style={{ gap: "1rem" }}>
-      <div className="row" style={{ justifyContent: "space-between" }}>
-        <h1>New transition</h1>
-        <div className="row">
-          <Link className="pill" href="/transition">
-            All transitions
-          </Link>
-          <Link className="pill" href="/">
-            Home
-          </Link>
-          <Link className="pill" href="/room/new">
-            Create room
-          </Link>
-        </div>
-      </div>
+    <main className="container col" style={{ gap: "0.75rem" }}>
+      <h1 style={{ margin: 0 }}>New transition</h1>
 
-      <TransitionComposer
-        presets={presets}
-        initialFrom={fromVideoInput}
-        initialTo={toVideoInput}
-        prefetchedSongAMeta={prefetchedSongAMeta}
-      />
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "minmax(0, 1fr) minmax(0, 420px)",
+          gap: "0.75rem",
+          alignItems: "start",
+        }}
+      >
+        <TransitionComposer
+          presets={presets}
+          initialFrom={fromVideoInput}
+          initialTo={toVideoInput}
+          prefetchedSongAMeta={prefetchedSongAMeta}
+        />
 
-      <section className="panel col">
-        <h2>Proposals (best first)</h2>
-        {!fromVideo || !toVideo ? (
-          <p className="muted">Enter Song A and Song B above to see proposals for this pair.</p>
-        ) : proposals.length === 0 ? (
-          <p className="muted">No proposals yet for this pair.</p>
-        ) : (
-          <div className="col">
-            {proposals.map((proposal, idx) => (
-              <div
-                key={proposal.id}
-                className="row"
-                style={{ justifyContent: "space-between", borderBottom: "1px solid #2a2f3a", padding: "0.5rem 0" }}
-              >
-                <div className="col" style={{ flex: 1 }}>
-                  <div className="row">
-                    {idx === 0 ? <span className="pill">Best</span> : null}
-                    <span className="muted">By {proposal.proposed_by.slice(0, 8)}</span>
+        <section className="panel col" style={{ maxHeight: "max(280px, calc(100vh - 170px))", minWidth: 0 }}>
+          <h2 className="wall-label" style={{ margin: "0 0 0.25rem" }}>Proposals (best first)</h2>
+          {!fromVideo || !toVideo ? (
+            <p className="muted" style={{ margin: 0 }}>No pair selected.</p>
+          ) : proposals.length === 0 ? (
+            <p className="muted" style={{ margin: 0 }}>No proposals yet for this pair.</p>
+          ) : (
+            <div className="col" style={{ overflowY: "auto", minHeight: 0 }}>
+              {proposals.map((proposal, idx) => (
+                <div
+                  key={proposal.id}
+                  className="row"
+                  style={{ justifyContent: "space-between", borderBottom: "1px solid var(--border)", padding: "0.5rem 0" }}
+                >
+                  <div className="col" style={{ flex: 1 }}>
+                    <div className="row">
+                      {idx === 0 ? <span className="pill">Best</span> : null}
+                      <span className="muted">By {proposal.proposed_by.slice(0, 8)}</span>
+                    </div>
+                    <span>
+                      A end: {formatMinSec(proposal.end_prev_sec)} / B start: {formatMinSec(proposal.start_next_sec)}
+                    </span>
+                    <span className="muted">
+                      {proposal.preset?.label ?? "—"}
+                      {proposal.prev_bpm != null ? ` · ${proposal.prev_bpm} BPM` : ""}
+                      {(() => {
+                        const fd = fadeBarsLabel(proposal.params as Record<string, unknown>);
+                        return fd != null ? ` · ${fd}` : "";
+                      })()}{" "}
+                      {proposal.note ? `- ${proposal.note}` : ""}
+                    </span>
                   </div>
-                  <span>
-                    A end: {formatMinSec(proposal.end_prev_sec)} / B start: {formatMinSec(proposal.start_next_sec)}
-                  </span>
-                  <span className="muted">
-                    {proposal.preset?.label ?? "—"}
-                    {proposal.prev_bpm != null ? ` · ${proposal.prev_bpm} BPM` : ""}
-                    {(() => {
-                      const fd = fadeBarsLabel(proposal.params as Record<string, unknown>);
-                      return fd != null ? ` · ${fd}` : "";
-                    })()}{" "}
-                    {proposal.note ? `- ${proposal.note}` : ""}
-                  </span>
+                  <div className="row">
+                    <span className="pill">{proposal.votes} votes</span>
+                    <form action={voteProposal}>
+                      <input type="hidden" name="proposalId" value={proposal.id} />
+                      <button type="submit">Vote</button>
+                    </form>
+                    <form action={voteProposal}>
+                      <input type="hidden" name="proposalId" value={proposal.id} />
+                      <input type="hidden" name="mode" value="remove" />
+                      <button type="submit" className="secondary">
+                        Unvote
+                      </button>
+                    </form>
+                    {proposal.proposed_by === user.id ? <DeleteProposalForm proposalId={proposal.id} /> : null}
+                  </div>
                 </div>
-                <div className="row">
-                  <span className="pill">{proposal.votes} votes</span>
-                  <form action={voteProposal}>
-                    <input type="hidden" name="proposalId" value={proposal.id} />
-                    <button type="submit">Vote</button>
-                  </form>
-                  <form action={voteProposal}>
-                    <input type="hidden" name="proposalId" value={proposal.id} />
-                    <input type="hidden" name="mode" value="remove" />
-                    <button type="submit" className="secondary">
-                      Unvote
-                    </button>
-                  </form>
-                  {proposal.proposed_by === user.id ? <DeleteProposalForm proposalId={proposal.id} /> : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </main>
   );
 }

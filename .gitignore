@@ -28,6 +28,10 @@ TODO.md
 # Local backup copies (may contain credentials — e.g. .env.local.bak, worker/.env.bak)
 *.bak
 
+# Local audio fixtures and the worker's server-side audio store (webaudio work)
+.audio-cache/
+public/spike/
+
 # OS
 .DS_Store
 

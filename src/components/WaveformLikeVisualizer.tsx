@@ -15,15 +15,22 @@ export function WaveformLikeVisualizer({ currentSec, durationSec, label }: Props
       <span className="muted" style={{ fontSize: "0.85rem" }}>
         {label}
       </span>
+      {/*
+       * Level-meter look that adapts to its surroundings: the base stays
+       * transparent (deep on a .hardware panel, light on a cream panel) and the
+       * fine vertical ticks are drawn from the inherited text color, so the
+       * same markup reads as cream pinstripes on dark gear and ink pinstripes
+       * on light panels.
+       */}
       <div
         style={{
           height: 48,
-          border: "1px solid #2a2f3a",
+          border: "1px solid color-mix(in srgb, currentColor 30%, transparent)",
           borderRadius: 10,
           overflow: "hidden",
           position: "relative",
           background:
-            "repeating-linear-gradient(90deg,#253045 0,#253045 3px,#182031 3px,#182031 8px)",
+            "repeating-linear-gradient(90deg, color-mix(in srgb, currentColor 16%, transparent) 0 1px, transparent 1px 6px)",
         }}
       >
         <div
@@ -31,7 +38,8 @@ export function WaveformLikeVisualizer({ currentSec, durationSec, label }: Props
             position: "absolute",
             inset: 0,
             width: `${progress}%`,
-            background: "linear-gradient(90deg, rgba(59,130,246,0.25), rgba(59,130,246,0.65))",
+            background:
+              "linear-gradient(90deg, color-mix(in srgb, var(--accent) 35%, transparent), color-mix(in srgb, var(--accent-strong) 70%, transparent))",
           }}
         />
         <div
@@ -41,7 +49,7 @@ export function WaveformLikeVisualizer({ currentSec, durationSec, label }: Props
             bottom: 0,
             left: `${progress}%`,
             width: 2,
-            background: "#93c5fd",
+            background: "var(--accent-strong)",
           }}
         />
       </div>

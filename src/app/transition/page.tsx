@@ -68,25 +68,17 @@ export default async function TransitionIndexPage(props: { searchParams: SearchP
   const qParam = q ? `&q=${encodeURIComponent(q)}` : "";
 
   return (
-    <main className="container col" style={{ gap: "1rem" }}>
+    <main className="container col" style={{ gap: "0.75rem" }}>
       <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap", gap: "0.5rem" }}>
-        <h1>Saved transitions</h1>
-        <div className="row" style={{ flexWrap: "wrap", gap: "0.5rem" }}>
-          <Link className="pill" href="/transition/new">
-            New transition
-          </Link>
-          <Link className="pill" href="/">
-            Home
-          </Link>
-          <Link className="pill" href="/room/new">
-            Create room
-          </Link>
-        </div>
+        <h1 style={{ margin: 0 }}>Saved transitions</h1>
+        <Link className="pill" href="/transition/new">
+          New transition
+        </Link>
       </div>
 
-      <section className="panel col" style={{ gap: "0.75rem" }}>
+      <section className="panel col" style={{ gap: "0.5rem" }}>
         <form method="get" action="/transition" className="row" style={{ gap: "0.5rem", flexWrap: "wrap", alignItems: "center" }}>
-          <label htmlFor="transition-search" className="muted">
+          <label htmlFor="transition-search" className="wall-label">
             Search
           </label>
           <input
@@ -115,7 +107,7 @@ export default async function TransitionIndexPage(props: { searchParams: SearchP
         </p>
       </section>
 
-      <section className="panel col" style={{ gap: 0 }}>
+      <section className="panel col" style={{ gap: 0, overflowY: "auto", maxHeight: "max(280px, calc(100vh - 310px))" }}>
         {rows.length === 0 ? null : (
           <ul className="col" style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {rows.map((row) => {
@@ -133,8 +125,8 @@ export default async function TransitionIndexPage(props: { searchParams: SearchP
                     justifyContent: "space-between",
                     alignItems: "flex-start",
                     gap: "0.75rem",
-                    borderBottom: "1px solid #2a2f3a",
-                    padding: "0.65rem 0",
+                    borderBottom: "1px solid var(--border)",
+                    padding: "0.5rem 0",
                   }}
                 >
                   <div className="col" style={{ flex: 1, gap: "0.25rem" }}>

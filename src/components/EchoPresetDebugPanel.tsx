@@ -21,8 +21,9 @@ export function EchoPresetDebugPanel({ snapshot }: Props) {
     lineHeight: 1.45,
     padding: "0.5rem 0.65rem",
     borderRadius: 6,
-    border: "1px solid var(--border, #333)",
-    background: "var(--surface-2, rgba(0,0,0,0.25))",
+    border: "1px solid var(--border)",
+    background: "var(--surface-2)",
+    color: "var(--ink)",
     whiteSpace: "pre-wrap",
     wordBreak: "break-all",
     maxHeight: 220,
@@ -32,7 +33,7 @@ export function EchoPresetDebugPanel({ snapshot }: Props) {
   if (snapshot == null) {
     return (
       <div style={boxStyle} className="muted" aria-label="Echo preset debug (idle)">
-        Echo debug: no snapshot (preset not echo, before anchor, or idle).
+        Echo debug: no snapshot.
       </div>
     );
   }
